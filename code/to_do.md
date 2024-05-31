@@ -17,3 +17,5 @@
 * Implement manifold optimization. Another point for Julia.
 
 * The gradient has a problem in that it may vanish if the matrix element itself is small or zero. In fact, the set of 0's probably (?) divides the space in two, so for half of the initial conditions it will have to pass through this space, and so never get there! (Think of the similar problem on the circle.) How to address? Need a different cost function? Or use a "swarm" approach...
+
+* The operator norm of the finite segment symmetry operator (when viewed as a transfer matrix) seems to be very close to 2. Why?
