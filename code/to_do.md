@@ -19,3 +19,7 @@
 * The gradient has a problem in that it may vanish if the matrix element itself is small or zero. In fact, the set of 0's probably (?) divides the space in two, so for half of the initial conditions it will have to pass through this space, and so never get there! (Think of the similar problem on the circle.) How to address? Need a different cost function? Or use a "swarm" approach...
 
 * The operator norm of the finite segment symmetry operator (when viewed as a transfer matrix) seems to be very close to 2. Why?
+
+* If the symmetry operation is not reflection symmetry (wrt the lattice), then the overlaps due to the left and right sides need not necessarily be the same. Is there anyway to know what the values should be ahead of time?
+
+* If we approximate the unitaries acting on a "transfer matrix vector" as infinitesimal, then we have a 3 dimensional distribution in the sense of differential geometry: https://en.wikipedia.org/wiki/Distribution_(differential_geometry). Can check if the distribution is involutive to see if there's a corresponding 3-manifold. Then approximate attainable points as being on that manifold. Not sure how helpful this is though, as the infinitesimal approximation seems a bit extreme...

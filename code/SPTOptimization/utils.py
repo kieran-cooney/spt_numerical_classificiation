@@ -196,3 +196,14 @@ def matrix_element(left_environment, left_transfer_matrices,
 
     return npc.trace(t_with_open_right_end, leg1='vR', leg2='vR*')
 
+
+def get_left_environment(psi, index):
+    left_leg = psi.get_B(index).legs[0]
+    SL = npc.diag(psi.get_SL(index), left_leg, labels = ['vL', 'vR'])
+    left_environment = (
+        npc.tensordot(SL, SL.conj(), (['vL',], ['vL*',]))
+        .combine_legs([['vR', 'vR*'],])
+        .to_ndarray()
+    )
+
+    return left_environment
