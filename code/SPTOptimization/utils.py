@@ -40,7 +40,33 @@ def to_npc_array(np_X):
     )
     return npc_X
 
+def reshape_1D_array_to_square(a):
+    """
+    Take a 1d numpy array of len N**2 and reshape into a numpy array of shape
+    (N,N).
 
+    Parameters
+    ----------
+    a: 1D numpy array
+        Must be of length N**2 for N a non-negative integer.
+
+    Returns
+    -------
+    2D numpy array
+        array of shape (N,N)
+    """
+    assert len(a.shape) == 1
+    # Notational clash with docstring.
+    N = len(a)
+
+    # Find square root of N, and ensure it's square.
+    sqrt_N = np.sqrt(N)
+    assert int(sqrt_N)**2 == N
+    sqrt_N = int(sqrt_N)
+
+    return a.reshape((sqrt_N, sqrt_N))
+
+    
 def multiply_transfer_matrices(t1, t2):
     """
     Given two tenpy arrays representing adjacent "sites" vertically contracted
@@ -88,7 +114,7 @@ def multiply_transfer_matrices_from_right(t1, t2):
 
 
 
-def get_transfer_matrix_from_unitary(psi, unitary, index):
+def get_transfer_matrix_from_unitary(psi, unitary, index, form='B'):
     """
     Given an MPS representing a many body wave function psi, contract the
     unitary matrix with psi at the site given by index and contract again
@@ -108,6 +134,9 @@ def get_transfer_matrix_from_unitary(psi, unitary, index):
     index: integer
         The index of the MPS psi to calculate the transfer matrix for
     Returns
+    form: string
+        The "gauge" to use when calculating the transfer matrix. Passed to
+        MPS.get_B from the tenpy package.
     -------
     tenpy.linalg.np_conserved.Array
         The resulting transfer matrix with legs vR, vR*, vL and vL*.
@@ -115,7 +144,7 @@ def get_transfer_matrix_from_unitary(psi, unitary, index):
     # Convert u to suitable tenpy form
     u = to_npc_array(unitary)
     # Get the B array associated to psi at the index
-    b = psi.get_B(index)
+    b = psi.get_B(index, form=form)
 
     # Contract with psi...
     t = npc.tensordot(b, u, (['p',], ['p*']))
@@ -125,7 +154,8 @@ def get_transfer_matrix_from_unitary(psi, unitary, index):
     return t
 
 
-def get_transfer_matrices_from_unitary_list(psi, unitaries, starting_index):
+def get_transfer_matrices_from_unitary_list(psi, unitaries, starting_index,
+                                            form='B'):
     """
     Calculate the transfer matrices of psi and psi conjugate sandwiching the
     list of unitaries. The unitaries are assumed to be adjacent, and ordered
@@ -140,16 +170,45 @@ def get_transfer_matrices_from_unitary_list(psi, unitaries, starting_index):
     starting_index: integer
         The index of the MPS psi to calculate the first transfer matrix for.
         The next will be for starting_index + 1 and so on.
+    form: string
+        The "gauge" to use when calculating the transfer matrices. Passed to
+        MPS.get_B from the tenpy package.
     Returns
     -------
     list of tenpy.linalg.np_conserved.Array
         The resulting transfer matrices with legs vR, vR*, vL and vL*.
     """
     transfer_matrices = [
-        get_transfer_matrix_from_unitary(psi, u, i)
+        get_transfer_matrix_from_unitary(psi, u, i, form=form)
         for i, u in enumerate(unitaries, start=starting_index)
     ]
     return transfer_matrices
+
+
+def tenpy_to_np_transfer_matrix(transfer_matrix):
+    """
+    Take transfer_matrix of type tenpy.linalg.np_conserved.Array and return
+    the correspdoning 2-dimensional numpy array.
+
+    Parameters
+    ----------
+    transfer_matrix: tenpy.linalg.np_conserved.Array
+        The input transfer matrix to be converted. Should have leg labels
+        'vL', 'vL*', 'vR' and 'vR*'.
+    Returns
+    -------
+    numpy.ndarray
+        The transfer matrix as a 2-dimensional numpy array. The first and second
+        indices correspond to the left and right legs of the transfer matrix
+        respectively.
+    """
+    np_transfer_matrix = (
+        transfer_matrix
+        .combine_legs([['vL', 'vL*'], ['vR', 'vR*']])
+        .to_ndarray()
+    )
+
+    return np_transfer_matrix
 
 
 def matrix_element(left_environment, left_transfer_matrices,
@@ -198,8 +257,27 @@ def matrix_element(left_environment, left_transfer_matrices,
 
 
 def get_left_environment(psi, index):
+    """
+    
+    Paramters
+    ---------
+    psi: tenpy.networks.mps.MPS
+        MPS representing a many body wavefunction
+    index: integer
+        The index of the site in psi for which to get the left environment
+        immediately to the left
+
+    Returns
+    -------
+    tenpy.linalg.np_conserved.Array   
+        A tenpy array with legs 'vR' and 'vR*' representing the two remaining 
+        legs of all the sites to the left of the site in psi at index.
+    """
+    # Need to be careful with 'legs' when using tenpy.
     left_leg = psi.get_B(index).legs[0]
     SL = npc.diag(psi.get_SL(index), left_leg, labels = ['vL', 'vR'])
+
+    # Schmidt values should all be real, so conjugate not really necessary here.
     left_environment = (
         npc.tensordot(SL, SL.conj(), (['vL',], ['vL*',]))
         .combine_legs([['vR', 'vR*'],])
