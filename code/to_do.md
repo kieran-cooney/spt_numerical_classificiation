@@ -23,3 +23,8 @@
 * If the symmetry operation is not reflection symmetry (wrt the lattice), then the overlaps due to the left and right sides need not necessarily be the same. Is there anyway to know what the values should be ahead of time?
 
 * If we approximate the unitaries acting on a "transfer matrix vector" as infinitesimal, then we have a 3 dimensional distribution in the sense of differential geometry: https://en.wikipedia.org/wiki/Distribution_(differential_geometry). Can check if the distribution is involutive to see if there's a corresponding 3-manifold. Then approximate attainable points as being on that manifold. Not sure how helpful this is though, as the infinitesimal approximation seems a bit extreme...
+
+* I have analytic results suggesting that the virtual vectors should have norm less than or equal to one, and transfer matrices from unitaries should have frobenius norm (and hence operator norm) less than or equal to 1. But that's not what we're seeing...
+    * Should step through proof(s) and verify numerically.
+
+* In between the regions of no symmetry operation and symmetry operations, we expect some kind of a local excitation to exist. What is the energy (and other properties) of this local excitation?
