@@ -28,3 +28,8 @@
     * Should step through proof(s) and verify numerically.
 
 * In between the regions of no symmetry operation and symmetry operations, we expect some kind of a local excitation to exist. What is the energy (and other properties) of this local excitation?
+
+* Losing track of all the formulae, should document in Latex somewhere.
+
+* Could use k-means clustering to find groups of virtual vectors when performing the full search. Faster than calculating all distances?
+* The methods we're describing here could be applied equally well (?) to the broader class of problems of optimizing the overlap between two different MPS with unitaries/operators. Is there anything specific to the SPT case which does not generalize?

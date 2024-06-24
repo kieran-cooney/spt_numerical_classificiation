@@ -9,10 +9,14 @@ To-do:
     * Get transfer matrix from unitary works for any operator, not just unitaries...!
     * Currently assuming that all the sites are qubits, should probably put in checks for
       sites with more than 2 degrees of freedom.
+
+Dependent code breaking changes:
+    * Arguments of get_transfer_matrix_from_unitary updated.
 """
 
 import numpy as np
 import tenpy.linalg.np_conserved as npc
+
 
 def to_npc_array(np_X):
     """
@@ -39,6 +43,7 @@ def to_npc_array(np_X):
         )
     )
     return npc_X
+
 
 def reshape_1D_array_to_square(a):
     """
@@ -114,7 +119,7 @@ def multiply_transfer_matrices_from_right(t1, t2):
 
 
 
-def get_transfer_matrix_from_unitary(psi, unitary, index, form='B'):
+def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
     """
     Given an MPS representing a many body wave function psi, contract the
     unitary matrix with psi at the site given by index and contract again
@@ -124,28 +129,35 @@ def get_transfer_matrix_from_unitary(psi, unitary, index, form='B'):
         * No reason why we we couldn't replace the hermitian conjugate of psi
           with another wavefunction...?
         * Add check for leg labels...?
+        * 'unitary' should be really a keyword argument None, where that would
+          result in an identity operator. Unfortunately that forces us to
+          change the argument ordering, and hence other code...
 
     Parameters
     ----------
     psi: tenpy.networks.mps.MPS
         The mps to calcualte the transfer matrix from
-    unitary: square numpy array
-        The single site operator
     index: integer
         The index of the MPS psi to calculate the transfer matrix for
-    Returns
+    unitary: square numpy array or None
+        The single site operator. If None set the operator to the identity
+        with appropriate dimension.
     form: string
         The "gauge" to use when calculating the transfer matrix. Passed to
         MPS.get_B from the tenpy package.
+    Returns
     -------
     tenpy.linalg.np_conserved.Array
         The resulting transfer matrix with legs vR, vR*, vL and vL*.
     """
     # Convert u to suitable tenpy form
-    u = to_npc_array(unitary)
+    if unitary is None:
+        dim_site = psi.dim[index]
+        u = to_npc_array(np.identity(dim_site))
+    else: 
+        u = to_npc_array(unitary)
     # Get the B array associated to psi at the index
     b = psi.get_B(index, form=form)
-
     # Contract with psi...
     t = npc.tensordot(b, u, (['p',], ['p*']))
     # ...and psi^dagger
@@ -179,7 +191,7 @@ def get_transfer_matrices_from_unitary_list(psi, unitaries, starting_index,
         The resulting transfer matrices with legs vR, vR*, vL and vL*.
     """
     transfer_matrices = [
-        get_transfer_matrix_from_unitary(psi, u, i, form=form)
+        get_transfer_matrix_from_unitary(psi, i, u, form=form)
         for i, u in enumerate(unitaries, start=starting_index)
     ]
     return transfer_matrices
