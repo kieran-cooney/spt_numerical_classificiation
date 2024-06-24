@@ -1,5 +1,6 @@
 """
 To-do:
+    * Calculate correlation lengths.
     * Careful with ordering of left boundary unitaries... Natural to keep it
       reversed wrt to the site ordering.
     * There should be a lot more checks for compatibile bond dimensions,
@@ -88,6 +89,9 @@ class SymmetryActionWithBoundaryUnitaries:
         The right dominant singular vector of the symmetry transfer matrix
     symmetry_transfer_matrix_singular_vals: 1D numpy.ndarray
         The singular values of the symmetry transfer matrix
+    right_transfer_matrices: list of tenpy.linalg.np_conserved.Array
+        The transfer matrices associated to the right boundary unitaries
+        in the "B"/G-L convention, ordered with the site index.
     right_edge_transfer_vector: 1D numpy.ndarray
         The virtual vector obtained by multiplying the right projected
         symmetry state by the right boundary transfer matrices iteratively.
@@ -95,6 +99,9 @@ class SymmetryActionWithBoundaryUnitaries:
         The expectation of the right boundary unitaries, assuming the
         symmetry transfer matrix is well approximated by the dominant
         singular value.
+    left_transfer_matrices: list of tenpy.linalg.np_conserved.Array
+        The transfer matrices associated to the left boundary unitaries
+        in the "A"/G-L convention, ordered opposite to the site index.
     left_boundary_transfer_vector: 1D numpy.ndarray
         The virtual vector obtained by multiplying the left environment
         virtual vector by the left boundary transfer matrices iteratively.
@@ -278,6 +285,8 @@ class SymmetryActionWithBoundaryUnitaries:
             self.right_symmetry_index + 1
         )
 
+        self.right_transfer_matrices = right_transfer_matrices
+
         right_transfer_matrices = [
             tenpy_to_np_transfer_matrix(tm) for tm in right_transfer_matrices
         ]
@@ -327,10 +336,12 @@ class SymmetryActionWithBoundaryUnitaries:
         # unitaries. Need to use 'A' (=L-G) convention.
         left_transfer_matrices = get_transfer_matrices_from_unitary_list(
             self.psi,
-            self.left_boundary_unitaries,
+            self.left_boundary_unitaries[::-1],
             left_edge_index,
             form='A'
         )
+
+        self.left_transfer_matrices = left_transfer_matrices[::-1]
 
         left_transfer_matrices = [
             tenpy_to_np_transfer_matrix(tm) for tm in left_transfer_matrices
@@ -349,10 +360,7 @@ class SymmetryActionWithBoundaryUnitaries:
         # way more similar to the right case but would need to think about it.
         left_boundary_transfer_vector = reduce(
             np.dot,
-            [
-                left_environment[np.newaxis, :],
-                *(left_transfer_matrices[::-1])
-            ]
+            [left_environment[np.newaxis, :], left_transfer_matrices]
         )
 
         self.left_boundary_transfer_vector = left_boundary_transfer_vector[0]
@@ -362,9 +370,9 @@ class SymmetryActionWithBoundaryUnitaries:
             self.left_projected_symmetry_state
         )
 
-        return self.left_expecation
+        return self.left_expectation
 
-    def compute_svd_approximate_exepctation(self):
+    def compute_svd_approximate_expectation(self):
         """
         Calculate the expectation of the boundary unitaries and symmetry
         operations acting on psi by taking an approximation of the transfer
