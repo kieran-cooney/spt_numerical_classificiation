@@ -17,6 +17,7 @@ To-do:
     * Add better documentation, overall docstring, include methods, etc.
 """
 from functools import reduce
+from itertools import accumulate
 import numpy as  np
 
 import tenpy.linalg.np_conserved as npc
@@ -25,6 +26,7 @@ from SPTOptimization.utils import (
     get_transfer_matrices_from_unitary_list,
     to_npc_array,
     multiply_transfer_matrices,
+    multiply_transfer_matrices_from_right,
     tenpy_to_np_transfer_matrix,
     reshape_1D_array_to_square
 )
@@ -83,28 +85,30 @@ class SymmetryActionWithBoundaryUnitaries:
     np_symmetry_transfer_matrix: 2D numpy.ndarray
         Overall 2D transfer matrix for the symmetry operations with the four
         legs combined into 2 pairs. In L-G-...-G-L convention.
-    left_projected_symmetry_state: 1D numpy.ndarray
+    left_projected_symmetry_state: npc.Array with legs 'vL', 'vL*'
         The left dominant singular vector of the symmetry transfer matrix
-    right_projected_symmetry_state: 1D numpy.ndarray
+    right_projected_symmetry_state: npc.Array with legs 'vR', 'vR*'
         The right dominant singular vector of the symmetry transfer matrix
     symmetry_transfer_matrix_singular_vals: 1D numpy.ndarray
         The singular values of the symmetry transfer matrix
     right_transfer_matrices: list of tenpy.linalg.np_conserved.Array
         The transfer matrices associated to the right boundary unitaries
         in the "B"/G-L convention, ordered with the site index.
-    right_edge_transfer_vector: 1D numpy.ndarray
-        The virtual vector obtained by multiplying the right projected
+    right_transfer_vectors: list of npc.Array with legs 'vR', 'vR*'
+        The virtual vectors obtained by multiplying the right projected
         symmetry state by the right boundary transfer matrices iteratively.
+        In the "B"/G-L convention.
     right_expectation: complex float
         The expectation of the right boundary unitaries, assuming the
         symmetry transfer matrix is well approximated by the dominant
         singular value.
     left_transfer_matrices: list of tenpy.linalg.np_conserved.Array
         The transfer matrices associated to the left boundary unitaries
-        in the "A"/G-L convention, ordered opposite to the site index.
-    left_boundary_transfer_vector: 1D numpy.ndarray
+        in the "A"/L-G convention, ordered opposite to the site index.
+    left_transfer_vectors: list of npc.Array with legs 'vL', 'vL*'
         The virtual vector obtained by multiplying the left environment
         virtual vector by the left boundary transfer matrices iteratively.
+        In the "A"/L-G convention.
     left_expectation: complex float
         The expectation of the left boundary unitaries, assuming the
         symmetry transfer matrix is well approximated by the dominant
@@ -243,6 +247,7 @@ class SymmetryActionWithBoundaryUnitaries:
             [['vR',],  ['vL',]]
         )
 
+        # SL should be real, so conj shouldn't be necessary...
         npc_symmetry_transfer_matrix = npc.tensordot(
             SL.conj(),
             npc_symmetry_transfer_matrix,
@@ -257,10 +262,15 @@ class SymmetryActionWithBoundaryUnitaries:
             .to_ndarray()
         )
 
-        U, S, Vh = np.linalg.svd(self.np_symmetry_transfer_matrix)
+        two_dim_tm = (
+            self.npc_symmetry_transfer_matrix
+            .combine_legs([['vL', 'vL*'], ['vR', 'vR*']])
+        )
 
-        self.left_projected_symmetry_state = U[:,0]
-        self.right_projected_symmetry_state = Vh[0]
+        U, S, Vh = npc.svd(two_dim_tm, full_matrices=True)
+
+        self.left_projected_symmetry_state = U[:,0].split_legs()
+        self.right_projected_symmetry_state = Vh[0].split_legs()
         self.symmetry_transfer_matrix_singular_vals = S
 
     def compute_right_boundary_expectation(self):
@@ -287,27 +297,17 @@ class SymmetryActionWithBoundaryUnitaries:
 
         self.right_transfer_matrices = right_transfer_matrices
 
-        right_transfer_matrices = [
-            tenpy_to_np_transfer_matrix(tm) for tm in right_transfer_matrices
-        ]
-
         # Iteratively multiply these against the dominant right singular
         # vector for the symmetry opeations transfer matrix.
-        right_edge_transfer_vector = reduce(
-            np.dot,
-            [
-                self.right_projected_symmetry_state[np.newaxis, :],
-                *right_transfer_matrices
-            ]
-        )
-
-        self.right_edge_transfer_vector = right_edge_transfer_vector
+        self.right_transfer_vectors = list(accumulate(
+            self.right_transfer_matrices,
+            multiply_transfer_matrices,
+            initial=self.right_projected_symmetry_state
+        ))
         
         # Dot against the right environment vector, which in the convention
         # we use is the same as taking the trace.
-        self.right_expectation = np.trace(
-            reshape_1D_array_to_square(right_edge_transfer_vector[0])
-        )
+        self.right_expectation = npc.trace(self.right_transfer_vectors[-1])
 
         return self.right_expectation
 
@@ -343,32 +343,17 @@ class SymmetryActionWithBoundaryUnitaries:
 
         self.left_transfer_matrices = left_transfer_matrices[::-1]
 
-        left_transfer_matrices = [
-            tenpy_to_np_transfer_matrix(tm) for tm in left_transfer_matrices
-        ]
-
-        # Compute left environment virtual vector, which is a straightforward
-        # kronecker delta in this convention.
-        left_edge_bond_dimension = len(self.psi.get_SL(left_edge_index))
-        left_environment = (
-            np.identity(left_edge_bond_dimension)
-            .reshape(left_edge_bond_dimension**2)
-        )
-
-        # Multiply transfer matrices iteratively against left environment
-        # virtual vector. Being a bit lazy here, could definitely do it in a
-        # way more similar to the right case but would need to think about it.
-        left_boundary_transfer_vector = reduce(
-            np.dot,
-            [left_environment[np.newaxis, :], left_transfer_matrices]
-        )
-
-        self.left_boundary_transfer_vector = left_boundary_transfer_vector[0]
-
-        self.left_expectation = np.dot(
-            self.left_boundary_transfer_vector,
-            self.left_projected_symmetry_state
-        )
+        # Iteratively multiply these against the dominant left singular
+        # vector for the symmetry opeations transfer matrix.
+        self.left_transfer_vectors = list(accumulate(
+            self.left_transfer_matrices,
+            multiply_transfer_matrices_from_right,
+            initial=self.left_projected_symmetry_state
+        ))
+        
+        # Dot against the left environment vector, which in the convention
+        # we use is the same as taking the trace.
+        self.left_expectation = npc.trace(self.left_transfer_vectors[-1])
 
         return self.left_expectation
 
