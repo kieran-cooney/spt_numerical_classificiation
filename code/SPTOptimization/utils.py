@@ -167,7 +167,7 @@ def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
     return t
 
 
-def get_transfer_matrices_from_unitary_list(psi, starting_index, unitaries=None, 
+def get_transfer_matrices_from_unitary_list(psi, starting_index, unitaries, 
                                             form='B'):
     """
     Calculate the transfer matrices of psi and psi conjugate sandwiching the
@@ -181,10 +181,10 @@ def get_transfer_matrices_from_unitary_list(psi, starting_index, unitaries=None,
     starting_index: integer
         The index of the MPS psi to calculate the first transfer matrix for.
         The next will be for starting_index + 1 and so on.
-    unitaries: List of square numpy arrays
-        List of single site operators or "None". If not set, taken to all be
-        the identity. If any single element is "None", that element is taken
-        to be the identity.
+    unitaries: List of square numpy arrays or a single integer
+        List of single site operators or integer. If any single element is
+        "None", that element is taken to be the identity. If an integer,
+        interpreted that there are that many indentity operators.
     form: string
         The "gauge" to use when calculating the transfer matrices. Passed to
         MPS.get_B from the tenpy package.
@@ -193,10 +193,10 @@ def get_transfer_matrices_from_unitary_list(psi, starting_index, unitaries=None,
     list of tenpy.linalg.np_conserved.Array
         The resulting transfer matrices with legs vR, vR*, vL and vL*.
     """
-    if unitaries is None:
+    if isinstance(unitaries, int):
         transfer_matrices = [
             get_transfer_matrix_from_unitary(psi, i, form=form)
-            for i, u in enumerate(unitaries, start=starting_index)
+            for i in range(starting_index, starting_index+unitaries)
         ]
     else:
         transfer_matrices = [
