@@ -12,6 +12,7 @@ To-do:
 
 Dependent code breaking changes:
     * Arguments of get_transfer_matrix_from_unitary updated.
+    * Arguments of get_transfer_matrices_from_unitary_list updated.
 """
 
 import numpy as np
@@ -166,7 +167,7 @@ def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
     return t
 
 
-def get_transfer_matrices_from_unitary_list(psi, unitaries, starting_index,
+def get_transfer_matrices_from_unitary_list(psi, starting_index, unitaries=None, 
                                             form='B'):
     """
     Calculate the transfer matrices of psi and psi conjugate sandwiching the
@@ -177,11 +178,13 @@ def get_transfer_matrices_from_unitary_list(psi, unitaries, starting_index,
     ----------
     psi: tenpy.networks.mps.MPS
         The mps to calcualte the transfer matrices from
-    unitaries: List of square numpy arrays
-        List of single site operators
     starting_index: integer
         The index of the MPS psi to calculate the first transfer matrix for.
         The next will be for starting_index + 1 and so on.
+    unitaries: List of square numpy arrays
+        List of single site operators or "None". If not set, taken to all be
+        the identity. If any single element is "None", that element is taken
+        to be the identity.
     form: string
         The "gauge" to use when calculating the transfer matrices. Passed to
         MPS.get_B from the tenpy package.
@@ -190,10 +193,17 @@ def get_transfer_matrices_from_unitary_list(psi, unitaries, starting_index,
     list of tenpy.linalg.np_conserved.Array
         The resulting transfer matrices with legs vR, vR*, vL and vL*.
     """
-    transfer_matrices = [
-        get_transfer_matrix_from_unitary(psi, i, u, form=form)
-        for i, u in enumerate(unitaries, start=starting_index)
-    ]
+    if unitaries is None:
+        transfer_matrices = [
+            get_transfer_matrix_from_unitary(psi, i, form=form)
+            for i, u in enumerate(unitaries, start=starting_index)
+        ]
+    else:
+        transfer_matrices = [
+            get_transfer_matrix_from_unitary(psi, i, u, form=form)
+            for i, u in enumerate(unitaries, start=starting_index)
+        ]
+
     return transfer_matrices
 
 
@@ -268,9 +278,66 @@ def matrix_element(left_environment, left_transfer_matrices,
     return npc.trace(t_with_open_right_end, leg1='vR', leg2='vR*')
 
 
+def get_left_identity_environment(psi, site_index):
+    """
+    Given the MPS psi, construct an environment with just 1's on the diagonal
+    which fits in immediately to the left of site_index.
+
+    To-do: Could add keyword argument for diagonal values.
+
+    Paramters
+    ---------
+    psi: tenpy.networks.mps.MPS
+        MPS representing a many body wavefunction
+    site_index: integer
+        The index of the site in psi for which to get the identity environment
+        immediately to the left
+
+    Returns
+    -------
+    tenpy.linalg.np_conserved.Array   
+        A diagonal tenpy array with legs 'vR' and 'vR*' with 1's on the
+        diagonal.
+    """
+    left_leg = psi.get_B(site_index).get_leg('vL')
+    left_environment = npc.diag(1, left_leg, labels = ['vR', 'vR*'])
+
+    return left_environment
+
+
+def get_right_identity_environment(psi, index):
+    """
+    Given the MPS psi, construct an environment with just 1's on the diagonal
+    which fits in immediately to the right of site_index.
+
+    To-do: Could add keyword argument for diagonal values.
+
+    Paramters
+    ---------
+    psi: tenpy.networks.mps.MPS
+        MPS representing a many body wavefunction
+    site_index: integer
+        The index of the site in psi for which to get the identity environment
+        immediately to the right.
+
+    Returns
+    -------
+    tenpy.linalg.np_conserved.Array   
+        A diagonal tenpy array with legs 'vL' and 'vL*' with 1's on the
+        diagonal.
+    """
+    right_leg = psi.get_B(index).get_leg('vR')
+    right_environment = npc.diag(1, right_leg, labels = ['vL', 'vL*'])
+
+    return right_environment
+
+
 def get_left_environment(psi, index):
     """
-    
+    COMMENT
+
+    To-do: Should output tenpy vs numpy array?
+
     Paramters
     ---------
     psi: tenpy.networks.mps.MPS

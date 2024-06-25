@@ -217,8 +217,8 @@ class SymmetryActionWithBoundaryUnitaries:
         self.symmetry_transfer_matrices = (
             get_transfer_matrices_from_unitary_list(
                 self.psi,
-                self.symmetry_operations,
-                self.left_symmetry_index
+                self.left_symmetry_index,
+                self.symmetry_operations
             )
         )
 
@@ -291,8 +291,8 @@ class SymmetryActionWithBoundaryUnitaries:
         # unitaries
         right_transfer_matrices = get_transfer_matrices_from_unitary_list(
             self.psi,
-            self.right_boundary_unitaries,
-            self.right_symmetry_index + 1
+            self.right_symmetry_index + 1,
+            self.right_boundary_unitaries
         )
 
         self.right_transfer_matrices = right_transfer_matrices
@@ -336,8 +336,8 @@ class SymmetryActionWithBoundaryUnitaries:
         # unitaries. Need to use 'A' (=L-G) convention.
         left_transfer_matrices = get_transfer_matrices_from_unitary_list(
             self.psi,
-            self.left_boundary_unitaries[::-1],
             left_edge_index,
+            self.left_boundary_unitaries[::-1],
             form='A'
         )
 
