@@ -9,6 +9,9 @@ To-do:
 * Most gradients split into the matrix gradient part (multivariate) and a
   loss function of the expectation part (single complex variable). Any way to
   formalise?
+* Initially thought I needed the gradients_outside_right_boundary_unitaries
+  and corresponding left function, but found a way around. Testing shows there
+  is likely an error with the left function.
 """
 
 from functools import reduce
@@ -20,11 +23,13 @@ import tenpy.linalg.np_conserved as npc
 from .utils import (
     multiply_transfer_matrices,
     multiply_transfer_matrices_from_right,
-    get_transfer_matrices_from_unitary_list
+    get_transfer_matrices_from_unitary_list,
+    get_left_identity_environment,
+    get_right_identity_environment
 )
 
 
-def anti_hermitian_projector(delta_U, U = None):
+def anti_hermitian_projector(delta_U, U=None):
     """
     Given a pertrubation delta_U to a unitary U, ensure that the resulting
     matrix delta_U + U is also unitary by enforcing a certain anti-Hermitian
@@ -112,9 +117,9 @@ def expectation_gradient_from_environments(psi, site_index,
     if right_environment is None:
         t = npc.trace(t, 'vR', 'vR*')
     else:
-        npc.tensordot(t, right_environment, (['vR','vR*'], ['vL', 'vL*']))
+        t = npc.tensordot(t, right_environment, (['vR','vR*'], ['vL', 'vL*']))
 
-    return t.to_ndarray()
+    return t
 
 
 def quadratic_expectation_gradient(matrix_gradient, expectation):
@@ -196,8 +201,8 @@ def first_order_correction_from_gradient_one_site(gradient, delta_U):
         perturbating the on site operator by delta_U.
     """
     return (
-        np.sum(np.real(gradient)*np.real(delta_U)) +
-        np.sum(np.imag(gradient)*np.imag(delta_U))
+        np.sum(np.real(gradient)*np.real(delta_U))
+        + np.sum(np.imag(gradient)*np.imag(delta_U))
     )
 
 
@@ -300,7 +305,7 @@ def expectation_gradient_from_transfer_matrices(psi, left_transfer_matrices,
 
 
 def expectation_gradients(psi, transfer_matrices, left_site_index,
-    left_environment=None, right_enviornment=None):
+    left_environment=None, right_environment=None, mps_form='B'):
     """
     Compute the derivatives of the expectation of operators on psi at 
     a range of site indices begining at left_site_index using the list
@@ -344,11 +349,23 @@ def expectation_gradients(psi, transfer_matrices, left_site_index,
     Fix optional environment logic.
     """
 
+    if left_environment is None:
+        left_environment = get_left_identity_environment(
+            psi, left_site_index
+        )
+
     left_environments = list(accumulate(
         transfer_matrices[:-1],
         multiply_transfer_matrices,
         initial=left_environment
     ))
+
+    right_site_index = left_site_index + len(transfer_matrices) - 1
+
+    if right_environment is None:
+        right_environment = get_right_identity_environment(
+            psi, right_site_index
+        )
 
     right_environments = list(accumulate(
         transfer_matrices[:0:-1],
@@ -362,7 +379,7 @@ def expectation_gradients(psi, transfer_matrices, left_site_index,
     )
 
     gradients = [
-        expectation_gradient_from_environments(psi, l_env, r_env, i)
+        expectation_gradient_from_environments(psi, i, l_env, r_env, mps_form)
         for i, (l_env, r_env) in iterator
     ]
 
@@ -399,14 +416,13 @@ def gradients_outside_left_boundary_unitaries(psi, right_environment,
         MPS, i.e. the first element of the list is always the gradient at the
         site with index left_site_index.
     """
-    # The site index of the last gradient to compute.
-    end_site_index = left_site_index - num_outside_sites
-
     # Transfer matrices ordered from right to left
-    transfer_matrices = [
-        get_transfer_matrix_from_unitary_list(psi, i, form='A')
-        for i in range(left_site_index - 1, end_site_index, -1)
-    ]
+    transfer_matrices = get_transfer_matrices_from_unitary_list(
+        psi,
+        left_site_index - 1,
+        num_outside_sites-1,
+        form='A'
+    )
 
     # List of all right environments for each of the sites
     right_environments = list(accumulate(
@@ -419,9 +435,9 @@ def gradients_outside_left_boundary_unitaries(psi, right_environment,
         
     gradients = [
         expectation_gradient_from_environments(
-            psi, i, right_enviornment=r_env, mps_form='A'
+            psi, i, right_environment=r_env, mps_form='A'
         )
-        for r_env, i in  zip(right_environments, site_indices)
+        for i, r_env in  zip(site_indices, right_environments)
     ]
 
     return gradients
@@ -456,23 +472,21 @@ def gradients_outside_right_boundary_unitaries(psi, left_environment,
         each site. The site ordering of this list is the same as that of the
         MPS.
     """
-    # The site index of the last site to compute a gradient for
-    end_site_index = right_site_index + num_outside_sites
-
-    transfer_matrices = [
-        get_transfer_matrix_from_unitary_list(psi, i)
-        for i in range(right_site_index + 1, end_site_index)
-    ]
+    transfer_matrices = get_transfer_matrices_from_unitary_list(
+        psi,
+        right_site_index + 1,
+        num_outside_sites-1,
+    )
 
     left_environments = list(accumulate(
         transfer_matrices,
         multiply_transfer_matrices,
-        left_environment
+        initial=left_environment
     ))
 
     gradients = [
         expectation_gradient_from_environments(psi, i, left_environment=l_env)
-        for l_env, i in enumerate(left_environments, start=right_site_index+1)
+        for i, l_env in enumerate(left_environments, start=right_site_index+1)
     ]
 
     return gradients
