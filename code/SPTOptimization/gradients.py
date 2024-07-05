@@ -12,6 +12,8 @@ To-do:
 * Initially thought I needed the gradients_outside_right_boundary_unitaries
   and corresponding left function, but found a way around. Testing shows there
   is likely an error with the left function.
+* Be a bit more uniform with the language in general. Matrix vs expectation
+  etc.
 """
 
 from functools import reduce
@@ -97,13 +99,13 @@ def expectation_gradient_from_environments(psi, site_index,
 
     Returns
     -------
-    square numpy array
-        Elements of this numpy array correspond to taking the gradient of the
+    square tenpy array with legs ['p*', 'p'] 
+        Elements of this tenpy array correspond to taking the gradient of the
         expected value with respect to a kronecker delta matrix with those
         same indices.
 
     To-do:
-    Input checks for canonical form choice and 'None' left/right
+    * Input checks for canonical form choice and 'None' left/right
     environments
     """
     b = psi.get_B(site_index, form=mps_form)
@@ -176,10 +178,10 @@ def linear_expectation_gradient(matrix_gradient, expectation):
     return expectation_phase*(matrix_gradient.conj())
 
 
-def first_order_correction_from_gradient_one_site(gradient, delta_U):
+def first_order_correction_from_gradient_one_site(gradient, delta_u):
     """
     Given a one site gradient "gradient" and a perturbation to a one site
-    operator "delta_U", compute the perturbation to the target function.
+    operator "delta_u", compute the perturbation to the target function.
 
     For the perturbation to the bare expectation, a simple tensor contraction
     will suffice. For real value functions of the expectation, such as the
@@ -201,15 +203,15 @@ def first_order_correction_from_gradient_one_site(gradient, delta_U):
         perturbating the on site operator by delta_U.
     """
     return (
-        np.sum(np.real(gradient)*np.real(delta_U))
-        + np.sum(np.imag(gradient)*np.imag(delta_U))
+        np.sum(np.real(gradient)*np.real(delta_u))
+        + np.sum(np.imag(gradient)*np.imag(delta_u))
     )
 
 
-def first_order_correction_from_gradients(gradients, delta_Us):
+def first_order_correction_from_gradients(gradients, delta_us):
     """
     Given gradients and perturbations to operators on a string of sites,
-    operator "delta_U", compute the perturbation to the target function.
+    operator "delta_u", compute the perturbation to the target function.
 
     The two lists should be the same length, ordered so that the i-th element
     of both lists refers to the same site.
@@ -219,7 +221,7 @@ def first_order_correction_from_gradients(gradients, delta_Us):
     gradients: list of square numpy array
         The gradients of some real function with respect to operators on a
         given site.
-    delta_U: list of square numpy array
+    delta_u: list of square numpy array
         The perturbations to operators on the same sites that "gradients" was
         calcualted.
 
@@ -227,7 +229,7 @@ def first_order_correction_from_gradients(gradients, delta_Us):
     -------
     real float
         The first order change to the target function as a result of 
-        perturbating the on site operator by delta_U.
+        perturbating the on site operator by delta_u.
     """
     return sum(
         first_order_correction_from_gradient_one_site(g, d)
@@ -277,7 +279,7 @@ def expectation_gradient_from_transfer_matrices(psi, left_transfer_matrices,
 
     Returns
     -------
-    square numpy array
+    square tenpy array with legs ['p*', 'p']
         Elements of this numpy array correspond to taking the gradient of the
         expected value with respect to a kronecker delta matrix with those
         same indices.
@@ -341,7 +343,7 @@ def expectation_gradients(psi, transfer_matrices, left_site_index,
 
     Returns
     -------
-    list of square numpy array
+    list of square tenpy numpy arrays with legs ['p*', 'p']
         List of gradients for each site, one for each element of
         transfer_matrices.
 
@@ -384,6 +386,7 @@ def expectation_gradients(psi, transfer_matrices, left_site_index,
     ]
 
     return gradients
+
 
 
 def gradients_outside_left_boundary_unitaries(psi, right_environment,
