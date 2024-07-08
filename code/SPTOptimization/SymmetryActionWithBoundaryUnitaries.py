@@ -31,6 +31,16 @@ from SPTOptimization.utils import (
     reshape_1D_array_to_square
 )
 
+from SPTOptimization.gradients import (
+    expectation_gradients,
+    quadratic_expectation_gradient,
+    anti_hermitian_projector,
+    get_expectation_gradient_fixed_basis,
+    get_expectation_hessian,
+    get_quadratic_expectation_hessian
+)
+
+
 class SymmetryActionWithBoundaryUnitaries:
     """
     Represents
@@ -73,6 +83,12 @@ class SymmetryActionWithBoundaryUnitaries:
         symmetry operations. Defaults to an empty list.
     num_right_unitary_sites: non-negative integer
         The number of unitaries in right_boundary_unitaries.
+    leftmost_boundary_index: non-negative integer
+        The index of the left most site of psi which the boundary operations
+        act on. 
+    rightmost_boundary_index: non-negative integer
+        The index of the right most site of psi whcih the boundary operations
+        act on.
     expectation: complex float
         The expectation of psi when operated on by the symmetry operations and
         the left and right boundary unitaries simultaneously.
@@ -117,6 +133,77 @@ class SymmetryActionWithBoundaryUnitaries:
         The expectation of psi when operated on by the symmetry operations and
         the left and right boundary unitaries simultaneously, while
         approximating the symmetry transfer matrix by it's dominant eigenvalue.
+    right_expectation_gradients: list of tenpy.linalg.np_conserved.Array
+        List of gradients with respect to right boundary unitaries, one for each
+        unitary. Each element has legs ['p', p*']. The elements of each array
+        correspond to taking the derivative of the expectation with respect to a
+        kronecker delta with the same ['p', p*'] indices.
+    right_projected_expectation_gradients: list of tenpy.linalg.np_conserved.Array
+        List of gradients with respect to right boundary unitaries, one for each
+        unitary. Each element has legs ['p', p*']. Same as
+        right_expectation_gradients but each gradient has been projected onto the
+        space of variations which preserve the unitarity of the relevant right
+        boundary unitary.
+    right_expectation_gradient_fixed_basis: numpy array of shape (n, 3)
+        n=len(right_boundary_unitaries). The [i,j] element corresponds to the
+        derivative of the expectation when the i-th unitary is varied in the j-th
+        direction.
+    left_expectation_gradients: list of tenpy.linalg.np_conserved.Array
+        List of gradients with respect to left boundary unitaries, one for each
+        unitary. Ordered the same as left_boundary_unitaries. Each element has
+        legs ['p', p*']. The elements of each array correspond to taking the
+        derivative of the expectation with respect to a kronecker delta with the
+        same ['p', p*'] indices.
+    left_projected_expectation_gradients: list of square numpy arrays
+        List of gradients with respect to left boundary unitaries, one for each
+        unitary. Each element has legs ['p', p*']. Same as
+        left_expectation_gradients but each gradient has been projected onto the
+        space of variations which preserve the unitarity of the relevant left
+        boundary unitary.
+    left_expectation_gradient_fixed_basis: list of square numpy arrays
+        n=len(right_boundary_unitaries). The [i,j] element corresponds to the
+        derivative of the expectation when the i-th unitary is varied in the j-th
+        direction.
+    right_quadratic_norm_gradients: list of square numpy arrays
+        List of gradients with respect to right boundary unitaries, one for each
+        unitary. The elements of each array correspond to taking the derivative of
+        the abs(expectation)**2 with respect to a kronecker delta with the same
+        indices.
+    right_linear_norm_gradients: list of square numpy arrays
+        List of gradients with respect to right boundary unitaries, one for each
+        unitary. The elements of each array correspond to taking the derivative of
+        the abs(expectation) with respect to a kronecker delta with the same
+        indices.
+    left_quadratic_norm_gradients: list of square numpy arrays
+        List of gradients with respect to left boundary unitaries, one for each
+        unitary. The elements of each array correspond to taking the derivative of
+        the abs(expectation)**2 with respect to a kronecker delta with the same
+        indices.
+    left_linear_norm_gradients: list of square numpy arrays
+        List of gradients with respect to left boundary unitaries, one for each
+        unitary. The elements of each array correspond to taking the derivative of
+        the abs(expectation) with respect to a kronecker delta with the same
+        indices.
+    right_expectation_hessian: numpy array of shape (nR, 3, nR, 3)
+        The hessian of the total expectation with respect to variations  in the
+        right boundary unitaries. The [i,j,k,l] element corresponds to varying the
+        i-th unitary in the j-th direction and the k-th unitary in the l-th
+        direction.
+    left_expectation_hessian: numpy array of shape (nL, 3, nL, 3)
+        The hessian of the total expectation with respect to variations  in the
+        left boundary unitaries. The [i,j,k,l] element corresponds to varying the
+        i-th unitary in the j-th direction and the k-th unitary in the l-th
+        direction.
+    right_quadratic_norm_hessian: symmetric square numpy array of dimension nR*3
+        Symmetry hessian matrix of abs(expectation)**2 with respect to specific
+        variations in each unitary of the right boundary unitaries.
+    left_quadratic_norm_hessian: symmetric square numpy array of dimension nL*3
+        Symmetry hessian matrix of abs(expectation)**2 with respect to specific
+        variations in each unitary of the left boundary unitaries.
+    right_hessian_eigenvalues: numpy array of shape (nR*3)
+        Eigenvalues of self.right_quadratic_norm_hessian.
+    left_hessian_eigenvalues: numpy array of shape (nL*3)
+        Eigenvalues of self.left_quadratic_norm_hessian.
     """
     def __init__(self, psi, symmetry_operations, left_symmetry_index=None,
                  left_boundary_unitaries=None, right_boundary_unitaries=None):
@@ -158,7 +245,9 @@ class SymmetryActionWithBoundaryUnitaries:
         else:
             self.left_symmetry_index = left_symmetry_index
         
-        self.right_symmetry_index = self.left_symmetry_index + len(self.symmetry_operations) - 1
+        self.right_symmetry_index = (
+            self.left_symmetry_index + len(self.symmetry_operations) - 1
+        )
 
         # Initialize the left and right boundary unitaries if not specified.
         if left_boundary_unitaries is None:
@@ -170,6 +259,14 @@ class SymmetryActionWithBoundaryUnitaries:
             self.right_boundary_unitaries = list()
         else: self.right_boundary_unitaries = right_boundary_unitaries
         self.num_right_unitary_sites = self.right_boundary_unitaries
+
+        self.rightmost_boundary_index = (
+            self.right_symmetry_index + self.num_right_unitary_sites
+        )
+
+        self.leftmost_boundary_index = (
+            self.left_symmetry_index - self.num_left_unitary_sites
+        )
 
     def compute_expectation(self):
         """
@@ -385,3 +482,239 @@ class SymmetryActionWithBoundaryUnitaries:
         )
 
         return self.svd_approximate_expectation
+
+    def compute_right_expectation_gradients(self):
+        """
+        Calculate the gradient of the expectation value with respect to
+        variations in right_boundary_unitaries. Three versions are calculated,
+        right_expectation_gradients, right_projected_expectation_gradients
+        and right_expectation_gradient_fixed_basis.
+
+        Returns
+        -------
+        None
+        """
+        # Gradients of right (not total) expectation.
+        bare_right_expectation_gradients = expectation_gradients(
+            self.psi,
+            self.right_transfer_matrices,
+            self.right_symmetry_index+1,
+            left_environment=self.right_projected_symmetry_state,
+            right_environment=None
+        )
+
+        # The bare gradient is the gradient with respect to the right 
+        # expectation. To get the gradient with respect to the total 
+        # expectation, must multiply by the missing factors.
+        self.right_expectation_gradients = (
+            bare_right_expectation_gradients
+            * self.symmetry_transfer_matrix_singular_vals[0]
+            * self.left_expectation
+        )
+
+        self.right_projected_expectation_gradients = list()
+
+        unitary_grad_pairs = zip(
+            self.right_boundary_unitaries,
+            self.right_expectation_gradients
+        )
+
+        for u, g in unitary_grad_pairs:
+            self.right_projected_expectation_gradients.append(
+                anti_hermitian_projector(g.to_ndarray(), u)
+            )
+
+        self.right_expectation_gradient_fixed_basis = (
+            get_expectation_gradient_fixed_basis(
+                self.right_expectation_gradients,
+                self.right_boundary_unitaries
+            )
+        )
+
+    def compute_left_expectation_gradients(self):
+        """
+        Calculate the gradient of the expectation value with respect to
+        variations in left_boundary_unitaries. Three versions are calculated,
+        left_expectation_gradients, left_projected_expectation_gradients
+        and left_expectation_gradient_fixed_basis.
+
+        Returns
+        -------
+        None
+        """
+        # Gradients of left (not total) expectation.
+        reversed_bare_left_expectation_gradients = expectation_gradients(
+            self.psi,
+            self.left_transfer_matrices[::-1],
+            self.leftmost_boundary_index,
+            left_environment=None,
+            right_environment=self.left_projected_symmetry_state,
+            mps_form='A'
+        )
+
+        bare_left_expectation_gradients = (
+            reversed_bare_left_expectation_gradients[::-1]
+        )
+
+        # The bare gradient is the gradient with respect to the left 
+        # expectation. To get the gradient with respect to the total 
+        # expectation, must multiply by the missing factors.
+        self.left_expectation_gradients = (
+            bare_left_expectation_gradients[::-1]
+            * self.symmetry_transfer_matrix_singular_vals[0]
+            * self.right_expectation
+        )
+
+        self.left_projected_expectation_gradients = list()
+
+        unitary_grad_pairs = zip(
+            self.left_boundary_unitaries,
+            self.left_expectation_gradients
+        )
+
+        for u, g in unitary_grad_pairs:
+            self.left_projected_expectation_gradients.append(
+                anti_hermitian_projector(g.to_ndarray(), u)
+            )
+
+        self.left_expectation_gradient_fixed_basis = (
+            get_expectation_gradient_fixed_basis(
+                self.left_expectation_gradients,
+                self.left_boundary_unitaries
+            )
+        )
+
+    def compute_right_norm_gradients(self):
+        """
+        Calculate the gradient of the abs(e) and abs(e)**2 = e*(conjugate(e))
+        with respect to the right boundary unitaries where e is the 
+        expectation value.
+
+        Returns
+        -------
+        None
+        """
+        self.right_quadratic_norm_gradients = list()
+        self.right_linear_norm_gradients = list()
+
+        for g in self.right_projected_expectation_gradients:
+            np_g = g.to_ndarray()
+
+            self.right_quadratic_norm_gradients.append(
+                quadratic_expectation_gradient(np_g, self.expectation)
+            )
+
+            self.right_linear_norm_gradients.append(
+                linear_expectation_gradient(np_g, self.expectation)
+            )
+
+    def compute_left_quadratic_norm_gradients(self):
+        """
+        Calculate the gradient of the abs(e) and abs(e)**2 = e*(conjugate(e))
+        with respect to the left boundary unitaries where e is the 
+        expectation value.
+
+        Returns
+        -------
+        None
+        """
+        self.left_quadratic_norm_gradients = list()
+        self.left_linear_norm_gradients = list()
+
+        for g in self.left_projected_expectation_gradients:
+            np_g = g.to_ndarray()
+
+            self.left_quadratic_norm_gradients.append(
+                quadratic_expectation_gradient(np_g, self.expectation)
+            )
+
+            self.left_linear_norm_gradients.append(
+                linear_expectation_gradient(np_g, self.expectation)
+            )
+
+    def compute_left_right_expectation_hessians(self):
+        """
+        Calculate the hessians of the expectation value with respect to
+        specific variations in the left and right boundary unitaries. There
+        are two hessians, one for the left and right boundary unitaries.
+
+        Returns
+        -------
+        None
+        """
+        # Hessian for right expectation
+        self.right_expectation_hessian = get_expectation_hessian(
+            self.psi,
+            self.right_symmetry_index+1,
+            self.right_boundary_unitaries,
+            self.right_transfer_matrices,
+            left_environment=self.right_projected_symmetry_state,
+            right_environment=None,
+            mps_form='B'
+        )
+
+        # Multiply by missing factor to get hessian for total expectation
+        self.right_expectation_hessian *= (
+            self.left_expectation
+            * self.symmetry_transfer_matrix_singular_vals[0]
+        )
+
+        # Hessian for left expectation
+        left_expectation_hessian = get_expectation_hessian(
+            self.psi,
+            self.leftmost_boundary_index,
+            self.left_boundary_unitaries[::-1],
+            self.left_transfer_matrices[::-1],
+            left_environment=None,
+            right_environment=self.left_projected_symmetry_state,
+            mps_form='A'
+        )
+
+        self.left_expectation_hessian = (
+            left_expectation_hessian[::-1, :, ::-1, ::]
+        )
+
+        # Multiply by missing factor to get hessian for total expectation
+        self.left_expectation_hessian *= (
+            self.right_expectation
+            * self.symmetry_transfer_matrix_singular_vals[0]
+        )
+
+    def compute_quadratic_norm_hessians(self):
+        """
+        Calculate the hessians of abs(expectation)**2 value with respect to
+        specific variations in the left and right boundary unitaries. There
+        are two hessians, one for the left and right boundary unitaries.
+
+        Returns
+        -------
+        None
+        """
+        self.right_quadratic_norm_hessian = get_quadratic_expectation_hessian(
+            self.expectation,
+            self.right_expectation_gradient_fixed_basis,
+            self.right_expectation_hessian
+        )
+
+        self.left_quadratic_norm_hessian = get_quadratic_expectation_hessian(
+            self.expectation,
+            self.left_expectation_gradient_fixed_basis,
+            self.left_expectation_hessian
+        )
+
+    def compute_hessian_eigenvalues(self):
+        """
+        Calculate the eigenvalues of self.right_quadratic_norm_hessian and
+        self.left_quadratic_norm_hessian.
+
+        Returns
+        -------
+        None
+        """
+        self.right_hessian_eigenvalues = np.linalg.eigvalsh(
+            self.right_quadratic_norm_hessian
+        )
+
+        self.left_hessian_eigenvalues = np.linalg.eigvalsh(
+            self.left_quadratic_norm_hessian
+        )
