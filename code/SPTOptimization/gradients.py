@@ -16,6 +16,7 @@ To-do:
   operators instead of unitaries, etc.
 * There are some formulae here without much explanation, should refer to
   derivations somewhere.
+* Move the 'NP_I' etc. definitions to a common folder.
 """
 
 from functools import reduce
@@ -32,6 +33,16 @@ from .utils import (
     get_right_identity_environment
 )
 
+NP_I = np.array([[1,0],[0,1]])
+NP_X = np.array([[0,1],[1,0]])
+NP_Y = np.array([[0,-1j],[1j,0]])
+NP_Z = np.array([[1,0],[0,-1]])
+
+NON_TRIVIAL_HERMITIANS = np.array([
+    1j*NP_X,
+    1j*NP_Y,
+    1j*NP_Z
+])
 
 def anti_hermitian_projector(delta_U, U=None):
     """
@@ -728,6 +739,7 @@ def get_expectation_gradient_fixed_basis(expectation_gradients, unitaries):
 
     return perturbation_gradients
 
+
 def get_quadratic_expectation_hessian(expectation, expectation_gradients,
                                       expectation_hessian):
     """
@@ -776,3 +788,4 @@ def get_quadratic_expectation_hessian(expectation, expectation_gradients,
     h2 = np.abs(second_order_from_first_hessian)**2
 
     return 2*(h1 + h2)
+
