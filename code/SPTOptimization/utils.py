@@ -19,6 +19,26 @@ import numpy as np
 import tenpy.linalg.np_conserved as npc
 
 
+def unitarize_matrix(X):
+    """
+    Convert a square numpy array to a unitary matrix.
+    The formula used actually produces the closest unitary to X for a specific
+    norm:
+    https://math.stackexchange.com/questions/3002970/show-the-polar-factor-is-the-closest-unitary-matrix-using-the-spectral-norm
+
+    Parameters
+    ----------
+    X: Square numpy array
+        Input numy array to be converted
+
+    Returns
+    -------
+    Unitary square numpy array of same shape as X
+    """
+    U, S, Vh = np.linalg.svd(X)
+    return np.dot(U, Vh)
+
+
 def to_npc_array(np_X):
     """
     Convert a numpy array to an array usable by tenpy.
@@ -133,6 +153,7 @@ def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
         * 'unitary' should be really a keyword argument None, where that would
           result in an identity operator. Unfortunately that forces us to
           change the argument ordering, and hence other code...
+        * It doesn't have to be a unitary, could be any operator!
 
     Parameters
     ----------
