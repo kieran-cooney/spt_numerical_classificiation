@@ -1,5 +1,6 @@
 """
 To-do:
+    * Add "pad" method to add identity unitaries at the boundary.
     * Calculate correlation lengths.
     * Careful with ordering of left boundary unitaries... Natural to keep it
       reversed wrt to the site ordering.
@@ -258,7 +259,7 @@ class SymmetryActionWithBoundaryUnitaries:
         if right_boundary_unitaries is None:
             self.right_boundary_unitaries = list()
         else: self.right_boundary_unitaries = right_boundary_unitaries
-        self.num_right_unitary_sites = self.right_boundary_unitaries
+        self.num_right_unitary_sites = len(self.right_boundary_unitaries)
 
         self.rightmost_boundary_index = (
             self.right_symmetry_index + self.num_right_unitary_sites
