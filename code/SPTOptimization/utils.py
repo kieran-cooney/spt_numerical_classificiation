@@ -355,9 +355,12 @@ def get_right_identity_environment(psi, index):
 
 def get_left_environment(psi, index):
     """
-    COMMENT
+    Given the MPS psi, construct an environment with just 1's on the diagonal
+    which fits in immediately to the right of site_index.
 
-    To-do: Should output tenpy vs numpy array?
+    To-do:
+        * Should output tenpy vs numpy array?
+        * Naming convention differs from right version.
 
     Paramters
     ---------
@@ -377,7 +380,7 @@ def get_left_environment(psi, index):
     left_leg = psi.get_B(index).legs[0]
     SL = npc.diag(psi.get_SL(index), left_leg, labels = ['vL', 'vR'])
 
-    # Schmidt values should all be real, so conjugate not really necessary here.
+    # Schmidt values should all be real, so conjugate not really necessary here
     left_environment = (
         npc.tensordot(SL, SL.conj(), (['vL',], ['vL*',]))
         .combine_legs([['vR', 'vR*'],])
@@ -385,3 +388,27 @@ def get_left_environment(psi, index):
     )
 
     return left_environment
+
+def get_identity_operator(psi, site_index):
+    """
+    Return a square identity numpy array with dimension that of the physical
+    dimension of psi at site_index.
+
+    Paramters
+    ---------
+    psi: tenpy.networks.mps.MPS
+        MPS representing a many body wavefunction
+    site_index: integer
+        The index of the site in psi for which to get the identity operator.
+        This is used just to find the correct dimension.
+
+    Returns
+    -------
+    square numpy.ndarray
+        A square identity numpy array with dimension that of the physical
+        dimension of psi at site_index.
+    """
+    dim = psi.dim[index]
+    X = np.identity(dim, dtype='complex')
+
+    return X
