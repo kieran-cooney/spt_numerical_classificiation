@@ -355,8 +355,9 @@ def get_right_identity_environment(psi, index):
 
 def get_left_environment(psi, index):
     """
-    Given the MPS psi, construct an environment with just 1's on the diagonal
-    which fits in immediately to the right of site_index.
+    COMMENT
+
+    (Do we even need this function?)
 
     To-do:
         * Should output tenpy vs numpy array?
