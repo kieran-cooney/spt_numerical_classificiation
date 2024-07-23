@@ -10,7 +10,7 @@ To-do:
       if certain calcualtions (expectations, etc.) have been completed since
       the last parameter update.
     * Add example code. Docs with diagrams of MPS and operators?
-    * There is an awkward bounding back and forth between tenpy and numpy
+    * There is an awkward bouncing back and forth between tenpy and numpy
       APIs. Should specify somewhere the when it was decided to use each one.
     * Need to explain (or even just right down the formulas) for the
       decomposition of the expectation into a product of left and right terms
