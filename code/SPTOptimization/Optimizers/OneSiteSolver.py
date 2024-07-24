@@ -2,6 +2,7 @@
 To-do:
     * Track unitaries as optimising.
     * Add "current expectation" function.
+    * Add a "to SymmetryActionaWithBoundaryUnitaries" method.
     * Currently tolerance is checking left_expectation and right_expectation,
       which could be quite different. Should really check wrt the overall
       expectation.
@@ -24,6 +25,7 @@ from SPTOptimization.utils import (
     get_identity_operator
 )
 
+from SPTOptimization.gradients import expectation_gradient_from_environments
 DEFAULT_TOLERANCE = 1e-3
 
 class OneSiteSolver:
@@ -184,7 +186,7 @@ class OneSiteSolver:
         self.right_abs_expectations = list()
         self.left_abs_expectations = list()
 
-    def pad_right(num_sites=1):
+    def pad_right(self, num_sites=1):
         """
         Increase the number of right_boundary_unitaries by num_sites by adding
         on identity operators to the right.
@@ -199,7 +201,7 @@ class OneSiteSolver:
 
         new_site_indices = list(range(
             self.rightmost_boundary_index + 1,
-            new_rightmost_boundary_index
+            new_rightmost_boundary_index + 1
         ))
 
         new_boundary_unitaries = [
@@ -226,13 +228,13 @@ class OneSiteSolver:
         ]
 
         # Update relevant attributes.
-        self.right_boundary_unitaries.append(new_boundary_unitaries)
+        self.right_boundary_unitaries.extend(new_boundary_unitaries)
         self.rightmost_boundary_index = new_rightmost_boundary_index
-        self.right_transfer_matrices.append(new_transfer_matrices)
-        self.left_right_environments.append(new_left_right_environments)
-        self.right_right_environments.append(new_right_right_environments)
+        self.right_transfer_matrices.extend(new_transfer_matrices)
+        self.left_right_environments.extend(new_left_right_environments)
+        self.right_right_environments.extend(new_right_right_environments)
 
-    def pad_left(num_sites=1):
+    def pad_left(self, num_sites=1):
         """
         Increase the number of left_boundary_unitaries by num_sites by adding
         on identity operators to the left.
@@ -247,8 +249,8 @@ class OneSiteSolver:
 
         new_site_indices = list(range(
             self.leftmost_boundary_index - 1,
-            new_leftmost_boundary_index,
-            step=-1
+            new_leftmost_boundary_index - 1,
+            -1
         ))
 
         new_boundary_unitaries = [
@@ -275,11 +277,11 @@ class OneSiteSolver:
         ]
 
         # Update relevant attributes.
-        self.left_boundary_unitaries.append(new_boundary_unitaries)
+        self.left_boundary_unitaries.extend(new_boundary_unitaries)
         self.leftmost_boundary_index = new_leftmost_boundary_index
-        self.left_transfer_matrices.append(new_transfer_matrices)
-        self.right_left_environments.append(new_right_left_environments)
-        self.left_left_environments.append(new_left_left_environments)
+        self.left_transfer_matrices.extend(new_transfer_matrices)
+        self.right_left_environments.extend(new_right_left_environments)
+        self.left_left_environments.extend(new_left_left_environments)
 
     def solve_one_right_site(self, site_index, boundary_unitary_index):
         """
@@ -308,13 +310,15 @@ class OneSiteSolver:
         le = self.left_right_environments[boundary_unitary_index]
         re = self.right_right_environments[boundary_unitary_index+1]
 
-        grad = expectation_gradient_from_environments(
+        tp_grad = expectation_gradient_from_environments(
             self.psi,
             site_index,
             left_environment=le,
             right_environment=re,
             mps_form='B'
         )
+
+        grad = tp_grad.to_ndarray()
 
         # Simple formula to find the optimised unitary, and then update.
         new_unitary = unitarize_matrix(grad.conj())
@@ -356,7 +360,7 @@ class OneSiteSolver:
 
         for boundary_unitary_index in range(num_sites):
             site_index = self.right_symmetry_index + 1 + boundary_unitary_index
-            exp = solve_one_right_site(site_index, boundary_unitary_index)
+            exp = self.solve_one_right_site(site_index, boundary_unitary_index)
             abs_expectations[boundary_unitary_index] = np.abs(exp)
         
         self.right_abs_expectations.append(abs_expectations)
@@ -370,6 +374,7 @@ class OneSiteSolver:
         To-do:
             * Way to do without improving variable? Break out of while loop
               instead of setting to False?
+            * Nest too deep at the end of the function.
         """
         # Variable which checks if the optimisation sweeps are improving the
         # expectation sufficiently wrt self.tolerance.
@@ -394,15 +399,17 @@ class OneSiteSolver:
             # site would improve sufficiently.
             if improvement < self.tolerance:
                 # Compute gradient of new site.
-                grad = expectation_gradient_from_environments(
+                tp_grad = expectation_gradient_from_environments(
                     self.psi,
                     self.rightmost_boundary_index+1,
                     left_environment=self.left_right_environments[-1],
                     mps_form='B'
                 )
 
+                S = np.linalg.svd(tp_grad.to_ndarray(), compute_uv=False)
+
                 # Calculate score without explicitly finding optimal unitary.
-                potential_exp = np.abs(np.trace(grad))
+                potential_exp = np.sum(S)
 
                 potential_improvement = (
                     prev_abs_expectation
@@ -441,13 +448,15 @@ class OneSiteSolver:
         le = self.left_left_environments[boundary_unitary_index+1]
         re = self.right_left_environments[boundary_unitary_index]
 
-        grad = expectation_gradient_from_environments(
+        tp_grad = expectation_gradient_from_environments(
             self.psi,
             site_index,
             left_environment=le,
             right_environment=re,
             mps_form='A'
         )
+
+        grad = tp_grad.to_ndarray()
 
         # Simple formula to find the optimised unitary, and then update.
         new_unitary = unitarize_matrix(grad.conj())
@@ -462,11 +471,11 @@ class OneSiteSolver:
         )
 
         self.left_transfer_matrices[boundary_unitary_index] = new_tm
-        new_re = multiply_transfer_matrices_from_right(new_tm, re)
+        new_re = multiply_transfer_matrices_from_right(re, new_tm)
         self.right_left_environments[boundary_unitary_index+1]=new_re
 
         new_expectation = npc.tensordot(
-            new_re, le, (['vR', 'vR*'], ['vL', 'vL*'])
+            le, new_re, (['vR', 'vR*'], ['vL', 'vL*'])
         )
 
         return new_expectation
@@ -489,7 +498,7 @@ class OneSiteSolver:
 
         for boundary_unitary_index in range(num_sites):
             site_index = self.left_symmetry_index - 1 - boundary_unitary_index
-            exp = solve_one_left_site(site_index, boundary_unitary_index)
+            exp = self.solve_one_left_site(site_index, boundary_unitary_index)
             abs_expectations[boundary_unitary_index] = np.abs(exp)
         
         self.left_abs_expectations.append(abs_expectations)
@@ -503,6 +512,7 @@ class OneSiteSolver:
         To-do:
             * Way to do without improving variable? Break out of while loop
               instead of setting to False?
+            * Nest too deep later in the function.
         """
         # Variable which checks if the optimisation sweeps are improving the
         # expectation sufficiently wrt self.tolerance.
@@ -527,15 +537,17 @@ class OneSiteSolver:
             # site would improve sufficiently.
             if improvement < self.tolerance:
                 # Compute gradient of new site.
-                grad = expectation_gradient_from_environments(
+                tp_grad = expectation_gradient_from_environments(
                     self.psi,
                     self.leftmost_boundary_index - 1,
                     right_environment=self.right_left_environments[-1],
                     mps_form='A'
                 )
-
+                
+                S = np.linalg.svd(tp_grad.to_ndarray(), compute_uv=False)
+                
                 # Calculate score without explicitly finding optimal unitary.
-                potential_exp = np.abs(np.trace(grad))
+                potential_exp = np.sum(S)
 
                 potential_improvement = (
                     prev_abs_expectation

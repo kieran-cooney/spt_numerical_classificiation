@@ -409,7 +409,7 @@ def get_identity_operator(psi, site_index):
         A square identity numpy array with dimension that of the physical
         dimension of psi at site_index.
     """
-    dim = psi.dim[index]
+    dim = psi.dim[site_index]
     X = np.identity(dim, dtype='complex')
 
     return X
