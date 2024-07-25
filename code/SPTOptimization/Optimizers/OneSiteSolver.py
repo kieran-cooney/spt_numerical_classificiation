@@ -6,12 +6,17 @@ To-do:
     * Currently tolerance is checking left_expectation and right_expectation,
       which could be quite different. Should really check wrt the overall
       expectation.
+    * The left_right_environments and right_left_environments both have a
+      fixed first entry, should remove.
+    * Is it strictly necessary to compute the right_right_environments and
+      left_left_environments at initialisation?
     * Docstring at top of file.
     * Provide optimisation formulae/derivation somewhere.
 """
-from itertools import accumulate
+from itertools import count, accumulate
 
 import numpy as np
+from scipy.stats import unitary_group
 
 import tenpy.linalg.np_conserved as npc
 
@@ -23,6 +28,10 @@ from SPTOptimization.utils import (
     get_right_identity_environment,
     get_left_identity_environment,
     get_identity_operator
+)
+
+from SPTOptimization.SymmetryActionWithBoundaryUnitaries import (
+    SymmetryActionWithBoundaryUnitaries
 )
 
 from SPTOptimization.gradients import expectation_gradient_from_environments
@@ -46,6 +55,10 @@ class OneSiteSolver:
     right_symmetry_index: non-negative integer
         The index of the right most site of psi whcih the symmetry operations
         act on.
+    num_right_unitary_sites: non-negative integer
+        The number of unitaries in right_boundary_unitaries.
+    num_left_unitary_sites: non-negative integer
+        The number of unitaries in left_boundary_unitaries.
     left_boundary_unitaries: list of 2d numpy arrays 
         The one site unitaries acting immediately to the left of the symmetry
         operations. Listed in reverse order to the site ordering, so that the
@@ -114,7 +127,9 @@ class OneSiteSolver:
         left expectation after updating the j-th left boundary unitary in
         the i-th sweep over the left boundary unitaries.
     """
-    def __init__(self, initial_conditions, tolerance=DEFAULT_TOLERANCE):
+    def __init__(self, initial_conditions, num_right_boundary_unitaries=None,
+                 num_left_boundary_unitaries=None, random_unitaries=False,
+                 tolerance=DEFAULT_TOLERANCE):
         """
         Parameters
         ----------
@@ -122,6 +137,17 @@ class OneSiteSolver:
             Class detailing the initial conditions of the problem, including
             the MPS, the symmetry operations, initial boundary unitaries and
             more.
+        num_right_boundary_unitaries: integer
+            The number of right boundary unitaries to optimise over. Takes as
+            many from initial_conditions as possible. If more needed, identity
+            matrices are used.
+        num_left_boundary_unitaries: integer
+            The number of left boundary unitaries to optimise over. Takes as
+            many from initial_conditions as possible. If more needed, identity
+            matrices are used.
+        random_unitaries: boolean
+            If True, randomly initialise all boundary unitaries, ignorning
+            values from initial_conditions.
         tolerance: float
             A float between zero and 1 specifying when the iterative 
             optimization should stop. Set to default value if not specified.
@@ -133,17 +159,97 @@ class OneSiteSolver:
         self.psi = ic.psi
         self.left_symmetry_index = ic.left_symmetry_index
         self.right_symmetry_index = ic.right_symmetry_index
-        self.leftmost_boundary_index = ic.leftmost_boundary_index
-        self.rightmost_boundary_index = ic.rightmost_boundary_index
-        self.left_boundary_unitaries = ic.left_boundary_unitaries
-        self.right_boundary_unitaries = ic.right_boundary_unitaries
+
+        if num_right_boundary_unitaries is None:
+            self.num_right_boundary_unitaries = ic.num_right_unitary_sites
+        else:
+            self.num_right_boundary_unitaries = num_right_boundary_unitaries
+
+        if num_left_boundary_unitaries is None:
+            self.num_left_boundary_unitaries = ic.num_left_unitary_sites
+        else:
+            self.num_left_boundary_unitaries = num_left_boundary_unitaries
+
+        self.rightmost_boundary_index = (
+            self.right_symmetry_index
+            + self.num_right_boundary_unitaries
+        )
+        self.leftmost_boundary_index = (
+            self.left_symmetry_index
+            - self.num_left_boundary_unitaries
+        )
+
+        # Physical dimensions of the boundary sites
+        right_boundary_dims = self.psi.dim[
+            self.right_symmetry_index + 1:
+            self.rightmost_boundary_index + 1
+        ]
+
+        left_boundary_dims = self.psi.dim[
+            self.left_symmetry_index - 1:
+            self.leftmost_boundary_index - 1:
+            -1
+        ]
+
+        # If random_unitaries is true, randomly initialise each boundary
+        # unitary.
+        if random_unitaries:
+            self.right_boundary_unitaries = [
+                unitary_group.rvs(d) for d in right_boundary_dims
+            ]
+
+            self.left_boundary_unitaries = [
+                unitary_group.rvs(d) for d in left_boundary_dims
+            ]
+
+        else:
+            # Number of right boundary unitaries to take from ic
+            num_rbu_from_ic = min(
+                ic.num_right_unitary_sites,
+                self.num_right_boundary_unitaries
+            )
+            self.right_boundary_unitaries = (
+                ic.right_boundary_unitaries.copy()[:num_rbu_from_ic]
+            )
+
+            # Fill leftovers with identities
+            for d in right_boundary_dims[num_rbu_from_ic:]:
+                self.right_boundary_unitaries.append(np.identity(d))
+
+            # Repeat for left hand side.
+            num_lbu_from_ic = min(
+                ic.num_left_unitary_sites,
+                self.num_left_boundary_unitaries
+            )
+
+            self.left_boundary_unitaries = (
+                ic.left_boundary_unitaries.copy()[:num_lbu_from_ic]
+            )
+
+            for d in left_boundary_dims[num_lbu_from_ic:]:
+                self.left_boundary_unitaries.append(np.identity(d))
+
         self.left_projected_symmetry_state = ic.left_projected_symmetry_state
         self.right_projected_symmetry_state = ic.right_projected_symmetry_state
         self.symmetry_singular_value = (
             ic.symmetry_transfer_matrix_singular_vals[0]
         )
-        self.right_transfer_matrices = ic.right_transfer_matrices
-        self.left_transfer_matrices = ic.left_transfer_matrices
+
+        self.right_transfer_matrices = [
+            get_transfer_matrix_from_unitary(self.psi, i, u, form='B')
+            for i, u in enumerate(
+                self.right_boundary_unitaries,
+                start=self.right_symmetry_index + 1
+            )
+        ]
+
+        self.left_transfer_matrices = [
+            get_transfer_matrix_from_unitary(self.psi, i, u, form='A')
+            for i, u in zip(
+                count(self.left_symmetry_index -1, -1),
+                self.left_boundary_unitaries
+            )
+        ]
 
         self.tolerance = tolerance
 
@@ -350,10 +456,10 @@ class OneSiteSolver:
         # unitaries on a previous sweep, as these are not updated during the
         # optimisation sweep.
         self.right_right_environments = list(accumulate(
-            self.right_transfer_matrices,
+            self.right_transfer_matrices[::-1],
             multiply_transfer_matrices_from_right,
             initial=self.right_right_environments[-1]
-        ))
+        ))[::-1]
 
         num_sites = len(self.right_boundary_unitaries)
         abs_expectations = np.zeros(num_sites)
@@ -393,7 +499,7 @@ class OneSiteSolver:
 
             new_abs_expectation = self.right_abs_expectations[-1][-1]
 
-            improvement = prev_abs_expectation - new_abs_expectation
+            improvement = new_abs_expectation - prev_abs_expectation
 
             # If not improving sufficiently, check if adding an additional
             # site would improve sufficiently.
@@ -412,8 +518,8 @@ class OneSiteSolver:
                 potential_exp = np.sum(S)
 
                 potential_improvement = (
-                    prev_abs_expectation
-                    - potential_exp
+                    potential_exp
+                    - prev_abs_expectation
                 )
 
                 if potential_improvement > self.tolerance:
@@ -488,10 +594,10 @@ class OneSiteSolver:
         # unitaries on a previous sweep, as these are not updated during the
         # optimisation sweep.
         self.left_left_environments = list(accumulate(
-            self.left_transfer_matrices,
+            self.left_transfer_matrices[::-1],
             multiply_transfer_matrices,
             initial=self.left_left_environments[-1]
-        ))
+        ))[::-1]
 
         num_sites = len(self.left_boundary_unitaries)
         abs_expectations = np.zeros(num_sites)
@@ -531,7 +637,7 @@ class OneSiteSolver:
 
             new_abs_expectation = self.left_abs_expectations[-1][-1]
 
-            improvement = prev_abs_expectation - new_abs_expectation
+            improvement = new_abs_expectation - prev_abs_expectation 
 
             # If not improving sufficiently, check if adding an additional
             # site would improve sufficiently.
@@ -550,8 +656,8 @@ class OneSiteSolver:
                 potential_exp = np.sum(S)
 
                 potential_improvement = (
-                    prev_abs_expectation
-                    - potential_exp
+                    potential_exp
+                    - prev_abs_expectation
                 )
 
                 if potential_improvement > self.tolerance:
@@ -580,3 +686,31 @@ class OneSiteSolver:
         left_exp = self.left_abs_expectations[-1][-1]
 
         return left_exp * self.symmetry_singular_value * right_exp
+
+    def to_SymmetryActionWithBoundaryUnitaries(self):
+        out = SymmetryActionWithBoundaryUnitaries(
+            self.psi,
+            ic.symmetry_operations,
+            self.left_symmetry_index,
+            self.left_boundary_unitaries,
+            self.right_boundary_unitaries
+        )
+
+        out.left_projected_symmetry_state = self.left_projected_symmetry_state
+        out.right_projected_symmetry_state = (
+            self.right_projected_symmetry_state
+        )
+
+        out.npc_symmetry_transfer_matrix = ic.npc_symmetry_transfer_matrix
+
+        out.symmetry_transfer_matrix_singular_vals = (
+            ic.symmetry_transfer_matrix_singular_vals
+        )
+
+        out.right_transfer_matrices = self.right_transfer_matrices
+        out.left_transfer_matrices = self.left_transfer_matrices
+
+        right_transfer_vectors=self.left_right_environments
+        left_transfer_vector=self.right_left_environmentss
+
+        return out
