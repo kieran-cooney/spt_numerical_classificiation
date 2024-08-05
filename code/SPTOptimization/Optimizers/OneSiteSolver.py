@@ -39,11 +39,8 @@ DEFAULT_TOLERANCE = 1e-3
 
 class OneSiteSolver:
     """
-    Represents
-        * A 1-dimensional manybody wavefunction psi
-        * A global symmetry action which only acts on finitely many sites of psi
-        * Left/right boundary unitaries which act on those sites in psi
-          immediately to the left/right of the symmetry operations.
+    Optimises unitaries of SymmetryActionWithBoundaryUnitaries instance
+    under the assumption that the boundary unitaries are all one site.
 
     Attributes
     ----------
@@ -126,10 +123,13 @@ class OneSiteSolver:
         The j-th entry of the i-th array is the left absolute value of the
         left expectation after updating the j-th left boundary unitary in
         the i-th sweep over the left boundary unitaries.
+    auto_pad: boolean
+        Boolean indicating wether additional boundary untiaries should be
+        added or not during optimisation.
     """
     def __init__(self, initial_conditions, num_right_boundary_unitaries=None,
                  num_left_boundary_unitaries=None, random_unitaries=False,
-                 tolerance=DEFAULT_TOLERANCE):
+                 tolerance=DEFAULT_TOLERANCE, auto_pad=True):
         """
         Parameters
         ----------
@@ -151,6 +151,9 @@ class OneSiteSolver:
         tolerance: float
             A float between zero and 1 specifying when the iterative 
             optimization should stop. Set to default value if not specified.
+        auto_pad: boolean
+            Boolean indicating wether additional boundary untiaries should be
+            added or not during optimisation. True by default.
         """
         ic = initial_conditions
 
@@ -292,6 +295,8 @@ class OneSiteSolver:
         self.right_abs_expectations = list()
         self.left_abs_expectations = list()
 
+        self.auto_pad = auto_pad
+
     def pad_right(self, num_sites=1):
         """
         Increase the number of right_boundary_unitaries by num_sites by adding
@@ -415,7 +420,6 @@ class OneSiteSolver:
         # operator to be optimised.
         le = self.left_right_environments[boundary_unitary_index]
         re = self.right_right_environments[boundary_unitary_index+1]
-
         tp_grad = expectation_gradient_from_environments(
             self.psi,
             site_index,
@@ -503,7 +507,7 @@ class OneSiteSolver:
 
             # If not improving sufficiently, check if adding an additional
             # site would improve sufficiently.
-            if improvement < self.tolerance:
+            if (improvement < self.tolerance) and self.auto_pad:
                 # Compute gradient of new site.
                 tp_grad = expectation_gradient_from_environments(
                     self.psi,
@@ -526,6 +530,8 @@ class OneSiteSolver:
                    self.pad_right()
                 else:
                     improving=False
+            elif (improvement < self.tolerance):
+                improving = False
 
     def solve_one_left_site(self, site_index, boundary_unitary_index):
         """
@@ -641,7 +647,7 @@ class OneSiteSolver:
 
             # If not improving sufficiently, check if adding an additional
             # site would improve sufficiently.
-            if improvement < self.tolerance:
+            if (improvement < self.tolerance) and self.auto_pad:
                 # Compute gradient of new site.
                 tp_grad = expectation_gradient_from_environments(
                     self.psi,
@@ -664,6 +670,8 @@ class OneSiteSolver:
                    self.pad_left()
                 else:
                     improving=False
+            elif (improvement < self.tolerance):
+                improving = False
 
     def optimize(self):
         """
