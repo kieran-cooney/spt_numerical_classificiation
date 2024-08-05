@@ -139,6 +139,41 @@ def multiply_transfer_matrices_from_right(t1, t2):
     return npc.tensordot(t1, t2, (['vL', 'vL*'], ['vR', 'vR*']))
 
 
+def get_transfer_matrix_from_tp_unitary(psi, index, unitary, form='B'):
+    """
+    Given an MPS representing a many body wave function psi, contract the
+    unitary matrix with psi at the site given by index and contract again
+    with the hermitian conjugate at the same location.
+
+    To-do:
+        * It doesn't have to be a unitary, could be any operator!
+        * Allow "None" for unitary
+
+    Parameters
+    ----------
+    psi: tenpy.networks.mps.MPS
+        The mps to calcualte the transfer matrix from
+    index: integer
+        The index of the MPS psi to calculate the transfer matrix for
+    unitary: tenpy.npc.Array
+        The single site operator. If None set the operator to the identity
+        with appropriate dimension.
+    form: string
+        The "gauge" to use when calculating the transfer matrix. Passed to
+        MPS.get_B from the tenpy package.
+    Returns
+    -------
+    tenpy.linalg.np_conserved.Array
+        The resulting transfer matrix with legs vR, vR*, vL and vL*.
+    """
+    # Get the B array associated to psi at the index
+    b = psi.get_B(index, form=form)
+    # Contract with psi...
+    t = npc.tensordot(b, unitary, (['p',], ['p*']))
+    # ...and psi^dagger
+    t = npc.tensordot(t, b.conj(), (['p',], ['p*']))
+
+    return t
 
 def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
     """
@@ -178,15 +213,40 @@ def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
         u = to_npc_array(np.identity(dim_site))
     else: 
         u = to_npc_array(unitary)
-    # Get the B array associated to psi at the index
-    b = psi.get_B(index, form=form)
-    # Contract with psi...
-    t = npc.tensordot(b, u, (['p',], ['p*']))
-    # ...and psi^dagger
-    t = npc.tensordot(t, b.conj(), (['p',], ['p*']))
 
-    return t
+    return get_transfer_matrix_from_tp_unitary(psi, index, unitary, form)
 
+
+def get_transfer_matrices_from_tp_unitary_list(psi, starting_index, unitaries,
+                                            form='B'):
+    """
+    Calculate the transfer matrices of psi and psi conjugate sandwiching the
+    list of unitaries. The unitaries are assumed to be adjacent, and ordered
+    with the first entry at the leftmost site.
+
+    Parameters
+    ----------
+    psi: tenpy.networks.mps.MPS
+        The mps to calcualte the transfer matrices from
+    starting_index: integer
+        The index of the MPS psi to calculate the first transfer matrix for.
+        The next will be for starting_index + 1 and so on.
+    unitaries: List of tenpy.npc.Array
+        List of single site operators. 
+    form: string
+        The "gauge" to use when calculating the transfer matrices. Passed to
+        MPS.get_B from the tenpy package.
+    Returns
+    -------
+    list of tenpy.linalg.np_conserved.Array
+        The resulting transfer matrices with legs vR, vR*, vL and vL*.
+    """
+    transfer_matrices = [
+        get_transfer_matrix_from_tp_unitary(psi, i, u, form=form)
+        for i, u in enumerate(unitaries, start=starting_index)
+    ]
+
+    return transfer_matrices
 
 def get_transfer_matrices_from_unitary_list(psi, starting_index, unitaries, 
                                             form='B'):
