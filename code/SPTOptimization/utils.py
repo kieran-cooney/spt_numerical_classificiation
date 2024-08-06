@@ -139,6 +139,38 @@ def multiply_transfer_matrices_from_right(t1, t2):
     return npc.tensordot(t1, t2, (['vL', 'vL*'], ['vR', 'vR*']))
 
 
+def get_transfer_matrix_from_tp_unitary_and_b_tensor(b, unitary, b_bra=None):
+    """
+    Given one b tensor representing a site of some mps psi, and a unitary u
+    acting at that site, return the transfer matrix resulting from the
+    appropriate contractions.
+
+    Parameters
+    ----------
+    b: tenpy.linalg.np_conserved.Array
+        tensor with legs 'vR', 'vL' and 'p', representing a single site of an
+        mps.
+    unitary: tenpy.npc.Array
+        The single site operator. If None set the operator to the identity
+        with appropriate dimension.
+    b_bra: None or tenpy.linalg.np_conserved.Array
+        tensor with legs 'vR', 'vL' and 'p', representing the bra that the
+        mps of b is contracted against after operating with u. If not
+        specified, b is used.
+    Returns
+    -------
+    tenpy.linalg.np_conserved.Array
+        The resulting transfer matrix with legs vR, vR*, vL and vL*.
+    """
+    # Contract with psi...
+    t = npc.tensordot(b, unitary, (['p',], ['p*']))
+    
+    b_bottom = b if (b_bra is None) else b_bra
+    # ...and psi^dagger
+    t = npc.tensordot(t, b_bottom.conj(), (['p',], ['p*']))
+
+    return t
+
 def get_transfer_matrix_from_tp_unitary(psi, index, unitary, form='B'):
     """
     Given an MPS representing a many body wave function psi, contract the
@@ -168,12 +200,9 @@ def get_transfer_matrix_from_tp_unitary(psi, index, unitary, form='B'):
     """
     # Get the B array associated to psi at the index
     b = psi.get_B(index, form=form)
-    # Contract with psi...
-    t = npc.tensordot(b, unitary, (['p',], ['p*']))
-    # ...and psi^dagger
-    t = npc.tensordot(t, b.conj(), (['p',], ['p*']))
 
-    return t
+    return get_transfer_matrix_from_tp_unitary_and_b_tensor(b, unitary)
+
 
 def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
     """
