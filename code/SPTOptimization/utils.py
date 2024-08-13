@@ -388,6 +388,27 @@ def matrix_element(left_environment, left_transfer_matrices,
     return npc.trace(t_with_open_right_end, leg1='vR', leg2='vR*')
 
 
+def get_left_identity_environment_from_tp_tensor(mps_tensor):
+    """
+    Given an MPS tensor, construct an environment with just 1's on the diagonal
+    which fits in immediately to the left of the tensor.
+
+    Paramters
+    ---------
+    mps_tensor: tenpy.linalg.np_conserved.Array,
+        Tensor with a leg 'vL'.
+
+    Returns
+    -------
+    tenpy.linalg.np_conserved.Array   
+        A diagonal tenpy array with legs 'vR' and 'vR*' with 1's on the
+        diagonal.
+    """
+    left_leg = mps_tensor.get_leg('vL')
+    left_environment = npc.diag(1, left_leg, labels = ['vR', 'vR*'])
+
+    return left_environment
+
 def get_left_identity_environment(psi, site_index):
     """
     Given the MPS psi, construct an environment with just 1's on the diagonal
@@ -409,10 +430,36 @@ def get_left_identity_environment(psi, site_index):
         A diagonal tenpy array with legs 'vR' and 'vR*' with 1's on the
         diagonal.
     """
-    left_leg = psi.get_B(site_index).get_leg('vL')
-    left_environment = npc.diag(1, left_leg, labels = ['vR', 'vR*'])
+    t = psi.get_B(site_index)
 
-    return left_environment
+    return get_left_identity_environment_from_tp_tensor(t)
+
+
+def get_right_identity_environment_from_tp_tensor(mps_tensor):
+    """
+    Given an MPS tensor, construct an environment with just 1's on the diagonal
+    which fits in immediately to the right of the tensor.
+
+    To-do: Could add keyword argument for diagonal values.
+
+    Paramters
+    ---------
+    psi: tenpy.networks.mps.MPS
+        MPS representing a many body wavefunction
+    site_index: integer
+        The index of the site in psi for which to get the identity environment
+        immediately to the right.
+
+    Returns
+    -------
+    tenpy.linalg.np_conserved.Array   
+        A diagonal tenpy array with legs 'vR' and 'vR*' with 1's on the
+        diagonal.
+    """
+    right_leg = mps_tensor.get_leg('vR')
+    right_environment = npc.diag(1, right_leg, labels = ['vL', 'vL*'])
+
+    return right_environment
 
 
 def get_right_identity_environment(psi, index):
@@ -436,10 +483,9 @@ def get_right_identity_environment(psi, index):
         A diagonal tenpy array with legs 'vL' and 'vL*' with 1's on the
         diagonal.
     """
-    right_leg = psi.get_B(index).get_leg('vR')
-    right_environment = npc.diag(1, right_leg, labels = ['vL', 'vL*'])
+    t = psi.get_B(index)
 
-    return right_environment
+    return get_right_identity_environment_from_tp_tensor(t)
 
 
 def get_left_environment(psi, index):
