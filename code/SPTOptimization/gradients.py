@@ -80,6 +80,62 @@ def zero_trace_projector():
 """
 
 
+def expectation_gradient_from_environments_and_b_tensor(
+    b, left_environment=None, right_environment=None, b_bra=None):
+    """
+    Compute the derivative of the expectation of operators on an MPS at a
+    site index represented by tensor b given the virtual vectors
+    (environments) immediately to the left and right of site_index.
+
+    Parameters
+    ----------
+    b: tenpy.linalg.np_conserved.Array
+        tensor with legs 'vR', 'vL' and 'p', representing a single site of an
+        mps.
+    left_environment: tenpy.linalg.np_conserved.Array with legs vR, vR* 
+        Represents the expected value contribution from those sites to the
+        left of site_index. If the left environment is not specified, it is
+        assumed that there are no operators to the left of the site, which
+        allows the left environment to be set automatically (under certain
+        gauge assumptions).
+    right_environment: tenpy.linalg.np_conserved.Array with legs vL, vL* 
+        Represents the expected value contribution from those sites to the
+        right of site_index. If the right environment is not specified, it is
+        assumed that there are no operators to the right of the site, which
+        allows the right environment to be set automatically (under certain
+        gauge assumptions).
+    b_bra: tenpy.linalg.np_conserved.Array
+        tensor with legs 'vR', 'vL' and 'p', representing a single site of an
+        mps. If provided, represents a site of a wavefunnction used in the bra
+        componenet of an expectation value. If not provided, b is used.
+
+    Returns
+    -------
+    square tenpy array with legs ['p*', 'p'] 
+        Elements of this tenpy array correspond to taking the gradient of the
+        expected value with respect to a kronecker delta matrix with those
+        same indices.
+
+    To-do:
+    * Input checks for canonical form choice and 'None' left/right
+    environments
+    """
+    if b_bra is None:
+        b_bra = b
+
+    if left_environment is None:
+        t = npc.tensordot(b, b_bra.conj(), (['vL',], ['vL*',]))
+    else:
+        t = npc.tensordot(left_environment, b_bra.conj(), (['vR*',], ['vL*',]))
+        t = npc.tensordot(t, b, (['vR',], ['vL',]))
+
+    if right_environment is None:
+        t = npc.trace(t, 'vR', 'vR*')
+    else:
+        t = npc.tensordot(t, right_environment, (['vR','vR*'], ['vL', 'vL*']))
+
+    return t
+
 def expectation_gradient_from_environments(psi, site_index,
     left_environment=None, right_environment=None, mps_form='B'):
     """
@@ -123,18 +179,9 @@ def expectation_gradient_from_environments(psi, site_index,
     """
     b = psi.get_B(site_index, form=mps_form)
 
-    if left_environment is None:
-        t = npc.tensordot(b, b.conj(), (['vL',], ['vL*',]))
-    else:
-        t = npc.tensordot(left_environment, b.conj(), (['vR*',], ['vL*',]))
-        t = npc.tensordot(t, b, (['vR',], ['vL',]))
-
-    if right_environment is None:
-        t = npc.trace(t, 'vR', 'vR*')
-    else:
-        t = npc.tensordot(t, right_environment, (['vR','vR*'], ['vL', 'vL*']))
-
-    return t
+    return expectation_gradient_from_environments_and_b_tensor(
+        b, left_environment, right_environment
+    )
 
 
 def quadratic_expectation_gradient(matrix_gradient, expectation):
