@@ -243,7 +243,7 @@ def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
     else: 
         u = to_npc_array(unitary)
 
-    return get_transfer_matrix_from_tp_unitary(psi, index, unitary, form)
+    return get_transfer_matrix_from_tp_unitary(psi, index, u, form)
 
 
 def get_transfer_matrices_from_tp_unitary_list(psi, starting_index, unitaries,
