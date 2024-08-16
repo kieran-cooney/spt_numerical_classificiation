@@ -139,11 +139,15 @@ def multiply_transfer_matrices_from_right(t1, t2):
     return npc.tensordot(t1, t2, (['vL', 'vL*'], ['vR', 'vR*']))
 
 
-def get_transfer_matrix_from_tp_unitary_and_b_tensor(b, unitary, b_bra=None):
+def get_transfer_matrix_from_tp_unitary_and_b_tensor(b, unitary, b_bra=None,
+    leg_label='p', leg_label_h=None):
     """
     Given one b tensor representing a site of some mps psi, and a unitary u
     acting at that site, return the transfer matrix resulting from the
     appropriate contractions.
+    
+    To-do:
+        * The logic handling the tensor axis labels is painful.
 
     Parameters
     ----------
@@ -157,17 +161,42 @@ def get_transfer_matrix_from_tp_unitary_and_b_tensor(b, unitary, b_bra=None):
         tensor with legs 'vR', 'vL' and 'p', representing the bra that the
         mps of b is contracted against after operating with u. If not
         specified, b is used.
+    leg_label: str or int
+        Label of the leg of b to contract against when constructing transfer
+        matrix. If an integer, then take that the leg label with that index.
+        Set to 'p' by default.
+    leg_label_h: str or int
+        Label of the leg of b_bra to contract against when constructing transfer
+        matrix. If an integer, then take that the leg label with that index.
+        Set to leg_label + '*'  by default.
     Returns
     -------
     tenpy.linalg.np_conserved.Array
         The resulting transfer matrix with legs vR, vR*, vL and vL*.
     """
-    # Contract with psi...
-    t = npc.tensordot(b, unitary, (['p',], ['p*']))
-    
     b_bottom = b if (b_bra is None) else b_bra
+    b_bottom = b_bottom.conj()
+
+    if isinstance(leg_label, int):
+        ll = b.get_leg_labels()[leg_label]
+    elif isinstance(leg_label, str):
+        ll = leg_label
+
+    if isinstance(leg_label_h, int):
+        llh = b_bottom.get_leg_labels()[leg_label_h]
+    elif (leg_label_h is None):
+        if isinstance(leg_label, int):
+            llh = b_bottom.get_leg_labels()[leg_label]    
+        elif isinstance(leg_label, str):
+            llh = leg_label + '*'
+    elif isinstance(leg_label_h, str):
+        llh = leg_label_h
+
+    # Contract with psi...
+    t = npc.tensordot(b, unitary, ([ll,], [llh,]))
+    
     # ...and psi^dagger
-    t = npc.tensordot(t, b_bottom.conj(), (['p',], ['p*']))
+    t = npc.tensordot(t, b_bottom, ([ll,], [llh,]))
 
     return t
 

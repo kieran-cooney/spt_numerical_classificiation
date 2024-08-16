@@ -1,4 +1,4 @@
-from itertools import accumulate
+from itertools import accumulate, count
 
 import numpy as np
 import tenpy.linalg.np_conserved as npc
@@ -53,8 +53,14 @@ def one_site_optimization(grad):
         The best possible expectation over all unitaries and the unitary
         attaining this maximum.
     """
-    U, S, VH = npc.svd(grad.complex_conj(), compute_uv=False)
+    U, S, VH = npc.svd(
+        grad.complex_conj(),
+        compute_uv=True,
+        inner_labels=['i', 'i*']
+    )
+
     out_unitary = npc.tensordot(U, VH, [['i',], ['i*',]])
+
     return (np.sum(S), out_unitary)
 
 
@@ -104,14 +110,14 @@ def one_site_optimization_sweep_right(left_environment, mps_tensors,
 
     if right_environments is None:
         transfer_matrices = [
-            get_transfer_matrix_from_tp_unitary_and_b_tensor(b1, u, b2)
-            for b, u, b2 in zip(mps_tensors, unitaries, mps_tensors_bra)
+            get_transfer_matrix_from_tp_unitary_and_b_tensor(b1, u, b2, 1)
+            for b1, u, b2 in zip(mps_tensors, unitaries, mps_tensors_bra)
         ]
 
         # Slice so we avoid calculating the inner most right environment, which
         # is unused.
         right_environments = list(accumulate(
-            transfer_matrices[:1:-1], 
+            transfer_matrices[:0:-1], 
             multiply_transfer_matrices_from_right,
             initial=last_right_environment
         ))[::-1]
@@ -119,7 +125,8 @@ def one_site_optimization_sweep_right(left_environment, mps_tensors,
     current_left_environment = left_environment
     expectations = list()
 
-    triples = zip(
+    quads = zip(
+        count(),
         mps_tensors,
         right_environments,
         mps_tensors_bra
@@ -127,7 +134,7 @@ def one_site_optimization_sweep_right(left_environment, mps_tensors,
 
     new_transfer_matrices = list()
 
-    for b, right_environment, b_bra in triples:
+    for i, b, right_environment, b_bra in quads:
         # Compute gradient
         grad = expectation_gradient_from_environments_and_b_tensor(
             b, current_left_environment, right_environment, b_bra
@@ -137,11 +144,11 @@ def one_site_optimization_sweep_right(left_environment, mps_tensors,
         new_expectation, new_unitary = one_site_optimization(grad)
 
         unitaries[i] = new_unitary
-        expectations[i] = new_expectation
+        expectations.append(new_expectation)
 
         # Create new left environment
         transfer_matrix = get_transfer_matrix_from_tp_unitary_and_b_tensor(
-            b, new_unitary, b_bra
+            b, new_unitary, b_bra, 1
         )
 
         new_transfer_matrices.append(transfer_matrix)
@@ -200,14 +207,14 @@ def one_site_optimization_sweep_left(right_environment, mps_tensors,
 
     if left_environments is None:
         transfer_matrices = [
-            get_transfer_matrix_from_tp_unitary_and_b_tensor(b1, u, b2)
-            for b, u, b2 in zip(mps_tensors, unitaries, mps_tensors_bra)
+            get_transfer_matrix_from_tp_unitary_and_b_tensor(b1, u, b2, 1)
+            for b1, u, b2 in zip(mps_tensors, unitaries, mps_tensors_bra)
         ]
 
         # Slice so we avoid calculating the inner most right environment,
         # which is unused.
         left_environments = list(accumulate(
-            transfer_matrices[:1:-1], 
+            transfer_matrices[:0:-1], 
             multiply_transfer_matrices_from_left,
             initial=last_left_environment
         ))[::-1]
@@ -215,14 +222,15 @@ def one_site_optimization_sweep_left(right_environment, mps_tensors,
     current_right_environment = right_environment
     expectations = list()
 
-    triples = zip(
+    quads = zip(
+        count(),
         mps_tensors,
         left_environments,
         mps_tensors_bra
     )
 
     new_transfer_matrices = list()
-    for b, left_environment, b_bra in triples:
+    for i, b, left_environment, b_bra in quads:
         # Compute gradient
         grad = expectation_gradient_from_environments_and_b_tensor(
             b, left_environment, current_right_environment, b_bra
@@ -232,11 +240,11 @@ def one_site_optimization_sweep_left(right_environment, mps_tensors,
         new_expectation, new_unitary = one_site_optimization(grad)
 
         unitaries[i] = new_unitary
-        expectations[i] = new_expectation
+        expectations.append(new_expectation)
 
         # Create new left environment
         transfer_matrix = get_transfer_matrix_from_tp_unitary_and_b_tensor(
-            b, new_unitary, b_bra
+            b, new_unitary, b_bra, 1
         )
 
         new_transfer_matrices.append(transfer_matrix)
