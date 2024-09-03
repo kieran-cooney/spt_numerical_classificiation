@@ -54,7 +54,7 @@ def one_site_optimization(grad):
         attaining this maximum.
     """
     U, S, VH = npc.svd(
-        grad.complex_conj(),
+        grad.conj(),
         compute_uv=True,
         inner_labels=['i', 'i*']
     )
