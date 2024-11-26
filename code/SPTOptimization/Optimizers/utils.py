@@ -108,10 +108,24 @@ def one_site_optimization_sweep_right(left_environment, mps_tensors,
     if mps_tensors_bra is None:
         mps_tensors_bra = mps_tensors
 
+    leg_label_pairs = [
+        sorted(u.get_leg_labels(), key=lambda l: '*' in l)
+        for u in unitaries
+    ]
+    
+    leg_labels = [p[0] for p in leg_label_pairs]
+    leg_labels_conj = [p[1] for p in leg_label_pairs]
+    
     if right_environments is None:
         transfer_matrices = [
-            get_transfer_matrix_from_tp_unitary_and_b_tensor(b1, u, b2, 1)
-            for b1, u, b2 in zip(mps_tensors, unitaries, mps_tensors_bra)
+            get_transfer_matrix_from_tp_unitary_and_b_tensor(b1, u, b2, ll, ll_c)
+            for b1, u, b2, ll, ll_c in zip(
+                mps_tensors,
+                unitaries,
+                mps_tensors_bra,
+                leg_labels,
+                leg_labels_conj
+            )
         ]
 
         # Slice so we avoid calculating the inner most right environment, which
@@ -125,16 +139,18 @@ def one_site_optimization_sweep_right(left_environment, mps_tensors,
     current_left_environment = left_environment
     expectations = list()
 
-    quads = zip(
+    hexes = zip(
         count(),
         mps_tensors,
         right_environments,
-        mps_tensors_bra
+        mps_tensors_bra,
+        leg_labels,
+        leg_labels_conj
     )
 
     new_transfer_matrices = list()
 
-    for i, b, right_environment, b_bra in quads:
+    for i, b, right_environment, b_bra, ll, ll_c in hexes:
         # Compute gradient
         grad = expectation_gradient_from_environments_and_b_tensor(
             b, current_left_environment, right_environment, b_bra
@@ -148,7 +164,7 @@ def one_site_optimization_sweep_right(left_environment, mps_tensors,
 
         # Create new left environment
         transfer_matrix = get_transfer_matrix_from_tp_unitary_and_b_tensor(
-            b, new_unitary, b_bra, 1
+            b, new_unitary, b_bra, ll, ll_c
         )
 
         new_transfer_matrices.append(transfer_matrix)
