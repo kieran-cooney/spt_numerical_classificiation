@@ -461,7 +461,7 @@ class SymmetryActionWithBoundaryUnitaries:
         operations acting on psi by taking an approximation of the transfer
         matrix of the symmetry operations where only the largest singular
         value of the SVD is kept. This allows us to split the expectation into
-        left and right terms, along witht the dominant singular value.
+        left and right terms, along with the dominant singular value.
 
         This is only valid if the largest singular value of the symmetry
         operations transfer matrix is significantly larger than all the

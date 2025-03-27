@@ -9,15 +9,30 @@ To-do:
     * Get transfer matrix from unitary works for any operator, not just unitaries...!
     * Currently assuming that all the sites are qubits, should probably put in checks for
       sites with more than 2 degrees of freedom.
+    * A lot of functions here, should be broken down into sub-packages.
 
 Dependent code breaking changes:
     * Arguments of get_transfer_matrix_from_unitary updated.
     * Arguments of get_transfer_matrices_from_unitary_list updated.
 """
+import re
+from functools import reduce
 
 import numpy as np
 import tenpy.linalg.np_conserved as npc
 
+from SPTOptimization.tenpy_leg_label_utils import (
+    get_physical_leg_labels,
+    conjugate_leg_label,
+    extract_single_physical_leg_label_from_tensor,
+    get_num_legs_block_unitary,
+    is_single_physical_leg_label,
+    is_grouped_physical_leg_label
+)
+
+MAX_VIRTUAL_BOND_DIM = 8
+MAX_INTERMEDIATE_VIRTUAL_BOND_DIM = 2*MAX_VIRTUAL_BOND_DIM
+SVD_CUTOFF = 1e-3
 
 def unitarize_matrix(X):
     """
@@ -577,3 +592,349 @@ def get_identity_operator(psi, site_index):
     X = np.identity(dim, dtype='complex')
 
     return X
+
+
+def get_npc_identity_operator(mps_tensor):
+    p_leg_label = get_physical_leg_labels(mps_tensor)[0]
+    p_leg = mps_tensor.get_leg(p_leg_label)
+    p_leg_label_conj = conjugate_leg_label(p_leg_label)
+
+    out = npc.diag(
+        1,
+        leg=p_leg,
+        dtype='complex',
+        labels=[p_leg_label, p_leg_label_conj]
+    )
+
+    return out
+
+###############################################################################
+# Functions for spllitng/grouping tenpy tensors.
+
+def group_elements(l, group_size, offset=0):
+    """
+    Given a list l, integers group_size and offset, return
+    [
+        [l[0], l[1], ..., l[offset - 1]],
+        [l[offset], ..., l[offset - 1 + group_size]],
+        ...
+    ]
+    """
+    first, rest = l[:offset], l[offset:]
+
+    num_rest_groups = ((len(rest)-1)//group_size) + 1
+
+    groups = [first,] if first else list()
+
+    for i in range(num_rest_groups):
+        first_index = i*group_size
+        last_index = (i+1)*group_size
+        groups.append(rest[first_index:last_index])
+
+    return groups
+
+
+def combine_tensors(tensors):
+    """
+    Combine a group of tenpy Arrays with virtual legs 'vR' and 'vL' so that
+    virtual legs are contracted and the physicsl legs are grouped.
+    """
+    contract_virtual_legs = lambda tl, tr: npc.tensordot(tl, tr, ['vR', 'vL'])
+
+    out = reduce(contract_virtual_legs, tensors)
+
+    leg_labels = [
+        extract_single_physical_leg_label_from_tensor(t)
+        for t in tensors
+    ]
+
+    out = out.combine_legs(leg_labels)
+
+    return out
+
+
+def combine_b_tensors(b_tensors):
+    renamed_tensors = [
+        b.replace_label('p', f'p{i}')
+        for i, b in enumerate(b_tensors)
+    ]
+
+    return combine_tensors(renamed_tensors)
+
+
+def svd_reduce_split_tensor(t, max_inner_dim=MAX_VIRTUAL_BOND_DIM,
+                           normalise=True, svd_cutoff=SVD_CUTOFF):
+    """
+    Apply the svd decomposition to a tensor in the virtual direction, and
+    truncate according to svd_cutoff and max_inner_dim.
+    """
+    U, S, VH = npc.svd(
+        t,
+        compute_uv=True,
+        inner_labels=['vR', 'vL'],
+        cutoff=svd_cutoff
+    )
+
+    # Truncate tensors:
+    U = U[:, :max_inner_dim]
+    S = S[:max_inner_dim]
+    VH = VH[:max_inner_dim, :]
+
+    if normalise:
+        new_norm = np.sqrt(np.sum(S**2))
+        S = S/new_norm
+
+    """
+    leg = VH.get_leg('vL')
+
+    schmidt_values = npc.diag(S, leg, labels=['vL', 'vR'])
+    """
+
+    return U, S, VH
+
+
+def split_combined_b(b, leftmost_schmidt_values,
+                     max_virtual_bond_dim=MAX_INTERMEDIATE_VIRTUAL_BOND_DIM,
+                     p_leg_labels=None):
+    """
+    Given an MPS b tensor with virtual legs 'vL' and 'vR' and a single
+    physical leg, split b into multiple individual tensors contracted along
+    virtual legs.
+
+    To-do: Better doc/reference for what's going on here.
+    """
+    t = b.split_legs()
+
+    num_sites = t.ndim - 2
+
+    if p_leg_labels is None:
+        p_leg_labels = [f'p{i}' for i in range(num_sites)]
+
+    out_bs = list()
+    out_schmidt_values = list()
+
+    current_left_schmidt_values = leftmost_schmidt_values
+
+    for i, ll in enumerate(p_leg_labels[:-1]):
+        # In case the bond dimension has been truncated. May need to add in a
+        # case if have less schmidt values than the bond dim...
+        bond_dim = t.get_leg('vL').get_block_sizes()[0]
+        t.iscale_axis(current_left_schmidt_values[:bond_dim], axis='vL')
+
+        tail_legs = p_leg_labels[(i+1):]
+        
+        t = t.combine_legs([['vL', ll], ['vR', *tail_legs]])
+
+        U, S, VH = svd_reduce_split_tensor(
+            t,
+            max_inner_dim=max_virtual_bond_dim,
+            normalise=True
+        )
+
+        bl = (
+            U
+            .split_legs()
+            .replace_label(ll, 'p')
+        )
+        bl.iscale_axis(1/current_left_schmidt_values[:bond_dim], axis='vL')
+        bl.iscale_axis(S, axis='vR')
+        bl.itranspose(['vL', 'p', 'vR'])
+        out_bs.append(bl)
+
+        out_schmidt_values.append(S)
+        current_left_schmidt_values=S
+
+        t = VH.split_legs()
+
+    bl = t.replace_label(p_leg_labels[-1], 'p')
+    bl.itranspose(['vL', 'p', 'vR'])
+    out_bs.append(bl)
+
+    return out_bs, out_schmidt_values
+
+
+def split_b(b, max_virtual_bond_dim=MAX_INTERMEDIATE_VIRTUAL_BOND_DIM,
+                     p_leg_labels=None):
+    """
+    Splits the MPS b tensor according to split_combined_b if the physical leg
+    is grouped, otherwise does nothing.
+    """
+    leg_label = get_physical_leg_labels(b)[0]
+
+    if is_single_physical_leg_label(leg_label):
+        return b
+    elif is_grouped_physical_leg_label(leg_label):
+        return split_combined_b(b, max_virtual_bond_dim, p_leg_labels)
+    else:
+        raise ValueError
+
+
+def combine_grouped_b_tensors(grouped_bs):
+    """
+    Takes a list of lists of b tensors, and returns a list of grouped b tensors.
+
+    To-do: Probably doesn't need a function in utils? Usage seems specific,
+    local...
+    """
+    out = list()
+
+    for group in grouped_bs:
+        if len(group) == 1:
+            out.append(group[0])
+        else:
+            out.append(combine_b_tensors(group))
+
+    return out
+
+###############################################################################
+
+def inner_product_b_tensors(b_tensors, b_bra_tensors=None, left_environment=None,
+                            right_environment=None):
+    """
+    Contract b_tensors against b_bra_tensors, including the left and right
+    environments if provided.
+    """
+    if b_bra_tensors is None:
+        b_bra_tensors = b_tensors
+
+    b = b_tensors[0]
+    b_bra = b_bra_tensors[0]
+
+    if left_environment is None:
+        t = npc.tensordot(b, b_bra.conj(), [['vL',], ['vL*',]])
+    else:
+        t = npc.tensordot(left_environment, b, [['vR',], ['vL',]])
+        t = npc.tensordot(t, b_bra.conj(), [['vR*', 'p'], ['vL*', 'p*']])
+
+    for b, b_bra in zip(b_tensors[1:], b_bra_tensors[1:]):
+        t = npc.tensordot(t, b, [['vR',], ['vL',]])
+        t = npc.tensordot(t, b_bra.conj(), [['vR*', 'p'], ['vL*', 'p*']])
+
+    if right_environment is None:
+        out = npc.trace(t)
+    else:
+        out = npc.tensordot(t, right_environment, [['vR', 'vR*'], ['vL', 'vL*']])
+
+    return out
+
+
+def get_left_side_right_symmetry_environment(
+    right_top_b_tensors, right_bottom_b_tensors, symmetry_transfer_matrix
+    ):
+    """
+    Given symmetry_transfer_matrix and two sets of MPS tensors immediately to
+    the right, contract the tensors to evalute the resulting symmetry
+    environment from symmetry_transfer_matrix on it's left side. 
+
+    (On the left side of said transfer matrix, the environment will be on the
+    right of any relevant tensors, hence the name.)
+    """
+    if right_bottom_b_tensors is None:
+        right_bottom_b_tensors = right_top_b_tensors
+
+    t = get_right_identity_environment_from_tp_tensor(right_top_b_tensors[-1])
+
+    for tb, bb in zip(right_top_b_tensors[::-1], right_bottom_b_tensors[::-1]):
+        t = npc.tensordot(t, tb, [['vL',], ['vR']])
+        t = npc.tensordot(t, bb.conj(), [['vL*', 'p'], ['vR*', 'p*']])
+
+    t = npc.tensordot(
+        t,
+        symmetry_transfer_matrix,
+        [['vL', 'vL*',], ['vR', 'vR*']]
+    )
+
+    return t
+
+def group_by_lengths(l, lengths):
+    """
+    Given a list l and a list of numbers lengths, return a list out where
+    out[0] is the first lengths[0] elements of l, out[1] is the next
+    lengths[1] elements and so on.
+
+    To-do: Could combine with group elements...?
+    """
+    out = list()
+
+    current_index = 0
+
+    for n in lengths:
+        current_group = l[current_index:current_index+n]
+        out.append(current_group)
+
+        current_index += n
+
+    return out
+
+
+def multiply_blocked_unitaries_against_mps(unitaries, b_tensors,
+    left_schmidt_values, max_virtual_bond_dim=MAX_VIRTUAL_BOND_DIM):
+    """
+    Given a list of blocked (on sites) unitaries, apply against MPS b tensors
+    and return a new set of b tensors.
+    """
+    site_group_lens = [get_num_legs_block_unitary(u) for u in unitaries]
+
+    grouped_bs = group_by_lengths(b_tensors, site_group_lens)
+    grouped_schmidt_values = group_by_lengths(
+        left_schmidt_values,
+        site_group_lens
+    )
+
+    combined_bs = combine_grouped_b_tensors(grouped_bs)
+
+    for i, u in enumerate(unitaries):
+        b = combined_bs[i]
+        ll = get_physical_leg_labels(b)[0]
+        llh = conjugate_leg_label(ll)
+    
+        new_b = npc.tensordot(b, u, [[ll,], [llh,]])
+    
+        combined_bs[i] = new_b
+
+    new_top_bs = list()
+    # Is the copy necessary...?
+    new_left_schmidt_values = left_schmidt_values.copy()
+
+    for b, s in zip (combined_bs, grouped_schmidt_values):
+        leg_label = get_physical_leg_labels(b)[0]
+        if is_single_physical_leg_label(leg_label):
+            new_top_bs.append(b)
+            new_left_schmidt_values.extend(s)
+        elif is_grouped_physical_leg_label(leg_label):
+            bs, schmidt_vals = split_combined_b(
+                b,
+                s[0],
+                max_virtual_bond_dim
+            )
+            new_top_bs.extend(bs)
+            new_left_schmidt_values.extend(s)
+
+    return new_top_bs, new_left_schmidt_values
+
+
+def multiply_stacked_unitaries_against_mps(unitaries, b_tensors,
+    left_schmidt_values, max_virtual_bond_dim=MAX_VIRTUAL_BOND_DIM):
+    """
+    The input unitaries should be indexed as
+    list[layer_index][brick_index], which would then return an appropriate
+    block unitary.
+
+    This function then applies the unitary represented by unitaries against
+    b_tensors, returning a new set of b_tensors.
+
+    Note: unitaries seems like a confusing name here, considering it's just one
+    unitary...
+    """
+    out_b_tensors = b_tensors.copy()
+    out_left_schmidt_values = left_schmidt_values.copy()
+
+    for l in unitaries:
+        out_b_tensors, out_left_schmidt_values = multiply_unitaries_against_mps(
+            l,
+            out_b_tensors,
+            out_left_schmidt_values,
+            max_virtual_bond_dim
+        )
+
+    return out_b_tensors, out_left_schmidt_values
