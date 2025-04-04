@@ -18,7 +18,8 @@ from SPTOptimization.utils import (
     group_elements,
     split_combined_b,
     get_left_side_right_symmetry_environment,
-    combine_grouped_b_tensors
+    combine_grouped_b_tensors,
+    multiply_stacked_unitaries_against_mps
 )
 
 from SPTOptimization.tenpy_leg_label_utils import (
@@ -71,12 +72,17 @@ class MPSBrickSolver:
             for k, i in enumerate(right_site_indices)
         ]
 
+        self.current_top_right_mps_tensors = self.bottom_right_mps_tensors
         self.top_right_mps_tensors = self.bottom_right_mps_tensors
 
-        self.current_right_side_left_schmidt_values =  [
+        self.original_right_side_left_schmidt_values =  [
             self.symmetry_case.psi.get_SL(i)
             for i in right_site_indices
         ]
+
+        self.current_right_side_left_schmidt_values =  (
+            self.original_right_side_left_schmidt_values.copy()
+        )
 
         left_site_indices = list(range(
             self.symmetry_case.left_symmetry_index - 1,
@@ -93,13 +99,17 @@ class MPSBrickSolver:
             swap_left_right_indices(b) for b in left_mps_tensors
         ]
 
+        self.current_top_left_mps_tensors = self.bottom_left_mps_tensors
         self.top_left_mps_tensors = self.bottom_left_mps_tensors
 
-        self.current_left_side_right_schmidt_values = [
+        self.original_left_side_right_schmidt_values = [
             self.symmetry_case.psi.get_SR(i)
             for i in left_site_indices
         ]
 
+        self.current_left_side_right_schmidt_values = (
+            self.original_left_side_right_schmidt_values.copy()
+        )
         self.left_unitaries = list()
         self.right_unitaries = list()
         self.left_expectations = list()
@@ -108,36 +118,51 @@ class MPSBrickSolver:
         self.__update_left_side_right_symmetry_environment()
         self.__update_right_side_left_symmetry_environment()
 
+    # All the swap_left_right_indices usage is annoying and could be done without...
     def __update_right_side_left_symmetry_environment(self):
         transfer_matrix = self.symmetry_case.npc_symmetry_transfer_matrix
 
-        right_side_left_symmetry_environment = (
+        out = (
             get_left_side_right_symmetry_environment(
-                self.top_left_mps_tensors,
+                self.current_top_left_mps_tensors,
                 self.bottom_left_mps_tensors,
-                swap_left_right_indices(transfer_matrix)
+                swap_left_right_indices(transfer_matrix),
+                left_side_environment=True
             )
         )
+
+        right_side_left_symmetry_environment, right_side_environment = out
 
         self.right_side_left_symmetry_environment = swap_left_right_indices(
             right_side_left_symmetry_environment
         )
 
+        self.right_side_environment = swap_left_right_indices(
+            right_side_environment
+        )
+
     def __update_left_side_right_symmetry_environment(self):
         transfer_matrix = self.symmetry_case.npc_symmetry_transfer_matrix
 
-        left_side_right_symmetry_environment = (
+        out = (
             get_left_side_right_symmetry_environment(
-                self.top_right_mps_tensors,
+                self.current_top_right_mps_tensors,
                 self.bottom_right_mps_tensors,
-                transfer_matrix
+                transfer_matrix,
+                left_side_environment=True
             )
         )
+
+        left_side_right_symmetry_environment, left_side_environment = out
 
         self.left_side_right_symmetry_environment = swap_left_right_indices(
             left_side_right_symmetry_environment
         )
 
+        # Name is wonky...
+        self.left_side_environment = swap_left_right_indices(
+            left_side_environment
+        )
 
     @staticmethod
     def optimise_right_side_one_layer(
@@ -225,8 +250,8 @@ class MPSBrickSolver:
 
         new_top_bs, new_schmidt_values, expectations, unitaries = out
 
-        self.top_right_mps_tensors = new_top_bs
-        self.current_right_side_left_schmidt_values = new_schmidt_values
+        self.current_top_right_mps_tensors = new_top_bs
+        self.future_right_side_left_schmidt_values = new_schmidt_values
         self.right_expectations[-1].append(expectations)
         self.right_current_layer_unitaries = unitaries
         
@@ -246,8 +271,8 @@ class MPSBrickSolver:
 
         new_top_bs, new_schmidt_values, expectations, unitaries = out
 
-        self.top_left_mps_tensors = new_top_bs
-        self.current_left_side_right_schmidt_values = new_schmidt_values
+        self.current_top_left_mps_tensors = new_top_bs
+        self.future_left_side_right_schmidt_values = new_schmidt_values
         self.left_expectations[-1].append(expectations)
         self.left_current_layer_unitaries = unitaries
 
@@ -271,6 +296,15 @@ class MPSBrickSolver:
 
         self.left_unitaries.append(self.left_current_layer_unitaries)
         self.right_unitaries.append(self.right_current_layer_unitaries)
+
+        self.top_right_mps_tensors = self.current_top_right_mps_tensors
+        self.current_right_side_left_schmidt_values = (
+            self.future_right_side_left_schmidt_values
+        )
+        self.top_left_mps_tensors = self.current_top_left_mps_tensors
+        self.current_left_side_right_schmidt_values = (
+            self.future_left_side_right_schmidt_values
+        )
 
     def optimise(self):
         for _ in range(self.num_layers):
@@ -309,3 +343,63 @@ class MPSBrickSolver:
 
         return out
 
+    def manual_expectation_value(self):
+        top_right_bs, _ = multiply_stacked_unitaries_against_mps(
+            self.right_unitaries,
+            self.bottom_right_mps_tensors,
+            self.original_right_side_left_schmidt_values,
+            self.max_virtual_bond_dim
+        )
+
+        right_t = npc.tensordot(
+            top_right_bs[-1],
+            self.bottom_right_mps_tensors[-1].conj(),
+            [['vR', 'p'], ['vR*', 'p*']]
+        )
+
+        b_pairs = zip(top_right_bs[-2::-1], self.bottom_right_mps_tensors[-2::-1])
+
+        for bt, bb in b_pairs:
+            right_t = npc.tensordot(
+                right_t,
+                bt,
+                [['vL',], ['vR',]]
+            )
+
+            right_t = npc.tensordot(
+                right_t,
+                bb.conj(),
+                [['vL*', 'p'], ['vR*', 'p*']]
+            )
+
+        right_t = npc.tensordot(
+            right_t,
+            self.symmetry_case.npc_symmetry_transfer_matrix,
+            [['vL', 'vL*'], ['vR', 'vR*']]
+        )
+
+        top_left_bs, _ = multiply_stacked_unitaries_against_mps(
+            self.left_unitaries,
+            self.bottom_left_mps_tensors,
+            self.original_left_side_right_schmidt_values,
+            self.max_virtual_bond_dim
+        )
+
+        b_pairs = zip(top_left_bs, self.bottom_left_mps_tensors)
+
+        for bt, bb in b_pairs:
+            right_t = npc.tensordot(
+                right_t,
+                swap_left_right_indices(bt),
+                [['vL',], ['vR']]
+            )
+
+            right_t = npc.tensordot(
+                right_t,
+                swap_left_right_indices(bb).conj(),
+                [['vL*', 'p'], ['vR*', 'p*']]
+            )
+
+        out = npc.trace(right_t, 'vL', 'vL*')
+
+        return out

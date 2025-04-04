@@ -819,7 +819,8 @@ def inner_product_b_tensors(b_tensors, b_bra_tensors=None, left_environment=None
 
 
 def get_left_side_right_symmetry_environment(
-    right_top_b_tensors, right_bottom_b_tensors, symmetry_transfer_matrix
+    right_top_b_tensors, right_bottom_b_tensors, symmetry_transfer_matrix,
+    left_side_environment=False
     ):
     """
     Given symmetry_transfer_matrix and two sets of MPS tensors immediately to
@@ -838,13 +839,16 @@ def get_left_side_right_symmetry_environment(
         t = npc.tensordot(t, tb, [['vL',], ['vR']])
         t = npc.tensordot(t, bb.conj(), [['vL*', 'p'], ['vR*', 'p*']])
 
-    t = npc.tensordot(
+    out = npc.tensordot(
         t,
         symmetry_transfer_matrix,
         [['vL', 'vL*',], ['vR', 'vR*']]
     )
 
-    return t
+    if left_side_environment:
+        return (out, t)
+    else:
+        return out
 
 def group_by_lengths(l, lengths):
     """
@@ -872,6 +876,8 @@ def multiply_blocked_unitaries_against_mps(unitaries, b_tensors,
     """
     Given a list of blocked (on sites) unitaries, apply against MPS b tensors
     and return a new set of b tensors.
+
+    Would this work on a list of unblocked unitaries...? Probably not.
     """
     site_group_lens = [get_num_legs_block_unitary(u) for u in unitaries]
 
@@ -930,11 +936,13 @@ def multiply_stacked_unitaries_against_mps(unitaries, b_tensors,
     out_left_schmidt_values = left_schmidt_values.copy()
 
     for l in unitaries:
-        out_b_tensors, out_left_schmidt_values = multiply_unitaries_against_mps(
+        out = multiply_blocked_unitaries_against_mps(
             l,
             out_b_tensors,
             out_left_schmidt_values,
             max_virtual_bond_dim
         )
+
+        out_b_tensors, out_left_schmidt_values = out
 
     return out_b_tensors, out_left_schmidt_values
