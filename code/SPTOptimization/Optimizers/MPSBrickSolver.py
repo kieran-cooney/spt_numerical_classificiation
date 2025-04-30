@@ -171,9 +171,10 @@ class MPSBrickSolver:
             left_schmidt_values,
             block_width,
             block_offset,
+            unitaries,
             bottom_b_tensors=None,
             num_iterations=1,
-            max_virtual_bond_dim=MAX_VIRTUAL_BOND_DIM
+            max_virtual_bond_dim=MAX_VIRTUAL_BOND_DIM,
         ):
 
         if bottom_b_tensors is None:
@@ -188,10 +189,6 @@ class MPSBrickSolver:
         bottom_combined_bs = combine_grouped_b_tensors(bottom_grouped_bs)
 
         expectations = list()
-
-        unitaries = [
-            get_npc_identity_operator(t) for t in top_combined_bs
-        ]
 
         for _ in range(num_iterations):
             exps, *_ = one_site_optimization_sweep_right(
@@ -243,17 +240,17 @@ class MPSBrickSolver:
             self.current_right_side_left_schmidt_values,
             self.block_width,
             self.block_offset,
+            self.right_current_layer_unitaries,
             bottom_b_tensors=self.bottom_right_mps_tensors,
             num_iterations=self.num_one_sided_iterations,
             max_virtual_bond_dim=self.max_virtual_bond_dim
         )
 
-        new_top_bs, new_schmidt_values, expectations, unitaries = out
+        new_top_bs, new_schmidt_values, expectations, _ = out
 
         self.current_top_right_mps_tensors = new_top_bs
         self.future_right_side_left_schmidt_values = new_schmidt_values
         self.right_expectations[-1].append(expectations)
-        self.right_current_layer_unitaries = unitaries
         
         self.__update_left_side_right_symmetry_environment()
 
@@ -264,17 +261,17 @@ class MPSBrickSolver:
             self.current_left_side_right_schmidt_values,
             self.block_width,
             self.block_offset,
+            self.left_current_layer_unitaries,
             bottom_b_tensors=self.bottom_left_mps_tensors,
             num_iterations=self.num_one_sided_iterations,
             max_virtual_bond_dim=self.max_virtual_bond_dim
         )
 
-        new_top_bs, new_schmidt_values, expectations, unitaries = out
+        new_top_bs, new_schmidt_values, expectations, _ = out
 
         self.current_top_left_mps_tensors = new_top_bs
         self.future_left_side_right_schmidt_values = new_schmidt_values
         self.left_expectations[-1].append(expectations)
-        self.left_current_layer_unitaries = unitaries
 
         self.__update_right_side_left_symmetry_environment()
 
@@ -286,9 +283,33 @@ class MPSBrickSolver:
         for _ in range(self.num_two_sided_iterations):
             self.two_sided_optimise_layer_one_iteration()
 
+    def initialize_unitaries(self):
+        # There is some duplication of code here with
+        # optimise_right_side_one_layer, not good.
+
+        group = lambda x: group_elements(x, self.block_width, self.block_offset)
+
+        # Left side
+        top_left_grouped_bs = group(self.top_left_mps_tensors)
+        top_left_combined_bs = combine_grouped_b_tensors(top_left_grouped_bs)
+
+        self.left_current_layer_unitaries = [
+            get_npc_identity_operator(t) for t in top_left_combined_bs
+        ]
+
+        # Right side
+        top_right_grouped_bs = group(self.top_right_mps_tensors)
+        top_right_combined_bs = combine_grouped_b_tensors(top_right_grouped_bs)
+
+        self.right_current_layer_unitaries = [
+            get_npc_identity_operator(t) for t in top_right_combined_bs
+        ]
+
     def add_new_layer(self):
         self.left_expectations.append(list())
         self.right_expectations.append(list())
+
+        self.initialize_unitaries()
 
     def finish_current_layer(self):
         self.block_offset += self.block_width//2
@@ -315,7 +336,7 @@ class MPSBrickSolver:
 
     @staticmethod
     def __flatten_list(l):
-        return [e for l1 in l for l2 in l for e in l2]
+        return [e for l1 in l for e in l1]
 
     def flatten_exps(self):
         """
@@ -344,6 +365,7 @@ class MPSBrickSolver:
         return out
 
     def manual_expectation_value(self):
+        # Currently this method only accounts for the "closed" layers.
         top_right_bs, _ = multiply_stacked_unitaries_against_mps(
             self.right_unitaries,
             self.bottom_right_mps_tensors,
