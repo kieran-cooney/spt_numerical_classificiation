@@ -7,6 +7,8 @@ To-do:
     * Compare with original BrickSolver.py, duplication?
     * Bricks or blocks...
 """
+from copy import deepcopy
+
 import tenpy.linalg.np_conserved as npc
 
 from SPTOptimization.Optimizers.utils import (
@@ -115,8 +117,15 @@ class MPSBrickSolver:
         self.left_expectations = list()
         self.right_expectations = list()
 
-        self.__update_left_side_right_symmetry_environment()
-        self.__update_right_side_left_symmetry_environment()
+        transfer_matrix = self.symmetry_case.npc_symmetry_transfer_matrix
+
+        self.right_side_left_symmetry_environment = npc.trace(
+            transfer_matrix, 'vL', 'vL*'
+        )
+
+        self.left_side_right_symmetry_environment = swap_left_right_indices(
+            npc.trace(transfer_matrix, 'vR', 'vR*')
+        )
 
     # All the swap_left_right_indices usage is annoying and could be done without...
     def __update_right_side_left_symmetry_environment(self):
@@ -124,10 +133,11 @@ class MPSBrickSolver:
 
         out = (
             get_left_side_right_symmetry_environment(
-                self.current_top_left_mps_tensors,
-                self.bottom_left_mps_tensors,
+                self.top_left_combined_bs,
+                self.bottom_left_combined_bs,
                 swap_left_right_indices(transfer_matrix),
-                left_side_environment=True
+                left_side_environment=True,
+                on_site_operators=self.left_current_layer_unitaries
             )
         )
 
@@ -146,10 +156,11 @@ class MPSBrickSolver:
 
         out = (
             get_left_side_right_symmetry_environment(
-                self.current_top_right_mps_tensors,
-                self.bottom_right_mps_tensors,
+                self.top_right_combined_bs,
+                self.bottom_right_combined_bs,
                 transfer_matrix,
-                left_side_environment=True
+                left_side_environment=True,
+                on_site_operators=self.right_current_layer_unitaries
             )
         )
 
@@ -167,60 +178,64 @@ class MPSBrickSolver:
     @staticmethod
     def optimise_right_side_one_layer(
             left_environment,
-            top_b_tensors,
+            top_combined_b_tensors,
             left_schmidt_values,
             block_width,
             block_offset,
-            bottom_b_tensors=None,
+            unitaries,
+            bottom_combined_b_tensors=None,
             num_iterations=1,
-            max_virtual_bond_dim=MAX_VIRTUAL_BOND_DIM
+            max_virtual_bond_dim=MAX_VIRTUAL_BOND_DIM,
         ):
 
-        if bottom_b_tensors is None:
-            bottom_b_tensors = top_b_tensors
-
-        group = lambda x: group_elements(x, block_width, block_offset)
-        top_grouped_bs = group(top_b_tensors)
-        bottom_grouped_bs = group(bottom_b_tensors)
-        grouped_schmidt_values = group(left_schmidt_values)
-
-        top_combined_bs = combine_grouped_b_tensors(top_grouped_bs)
-        bottom_combined_bs = combine_grouped_b_tensors(bottom_grouped_bs)
+        if bottom_combined_b_tensors is None:
+            bottom_combined_b_tensors = top_combined_b_tensors
 
         expectations = list()
-
-        unitaries = [
-            get_npc_identity_operator(t) for t in top_combined_bs
-        ]
 
         for _ in range(num_iterations):
             exps, *_ = one_site_optimization_sweep_right(
                 left_environment,
-                top_combined_bs,
+                top_combined_b_tensors,
                 unitaries,
-                bottom_combined_bs
+                bottom_combined_b_tensors
             )
 
             expectations.append(exps)
 
+        return expectations, unitaries
+
+    @staticmethod
+    def split_b_tensors(
+            top_combined_b_tensors,
+            unitaries,
+            block_width,
+            block_offset,
+            left_schmidt_values,
+            max_virtual_bond_dim
+        ):
+        # To-do: Should really group the schmidt values first...
+
         for i, u in enumerate(unitaries):
-            b = top_combined_bs[i]
+            b = top_combined_b_tensors[i]
             ll = get_physical_leg_labels(b)[0]
             llh = conjugate_leg_label(ll)
         
             new_b = npc.tensordot(b, u, [[ll,], [llh,]])
         
-            top_combined_bs[i] = new_b
+            top_combined_b_tensors[i] = new_b
+
+        group = lambda x: group_elements(x, block_width, block_offset)
+        grouped_schmidt_values = group(left_schmidt_values)
 
         new_top_bs = list()
         #new_left_schmidt_values = left_schmidt_values.copy()
         new_left_schmidt_values = list()
 
         # To-do:
-        # Don't need to do this step always, just when moving to a new layer.
         # Might be useful to make into a separate function, perform similar
         # logic in utils.multiply_blocked_unitaries_against_mps
-        for b, s in zip (top_combined_bs, grouped_schmidt_values):
+        for b, s in zip (top_combined_b_tensors, grouped_schmidt_values):
             leg_label = get_physical_leg_labels(b)[0]
             if is_single_physical_leg_label(leg_label):
                 new_top_bs.append(b)
@@ -234,47 +249,43 @@ class MPSBrickSolver:
                 new_top_bs.extend(bs)
                 new_left_schmidt_values.extend(s)
 
-        return new_top_bs, new_left_schmidt_values, expectations, unitaries
+        return new_top_bs, new_left_schmidt_values
 
     def optimise_right_layer(self):
         out = MPSBrickSolver.optimise_right_side_one_layer(
             self.right_side_left_symmetry_environment,
-            self.top_right_mps_tensors,
+            self.current_top_right_combined_bs,
             self.current_right_side_left_schmidt_values,
             self.block_width,
             self.block_offset,
-            bottom_b_tensors=self.bottom_right_mps_tensors,
+            self.right_current_layer_unitaries,
+            bottom_combined_b_tensors=self.bottom_right_combined_bs,
             num_iterations=self.num_one_sided_iterations,
             max_virtual_bond_dim=self.max_virtual_bond_dim
         )
 
-        new_top_bs, new_schmidt_values, expectations, unitaries = out
+        expectations, _ = out
 
-        self.current_top_right_mps_tensors = new_top_bs
-        self.future_right_side_left_schmidt_values = new_schmidt_values
         self.right_expectations[-1].append(expectations)
-        self.right_current_layer_unitaries = unitaries
         
         self.__update_left_side_right_symmetry_environment()
 
     def optimise_left_layer(self):
         out = MPSBrickSolver.optimise_right_side_one_layer(
             self.left_side_right_symmetry_environment,
-            self.top_left_mps_tensors,
+            self.current_top_left_combined_bs,
             self.current_left_side_right_schmidt_values,
             self.block_width,
             self.block_offset,
-            bottom_b_tensors=self.bottom_left_mps_tensors,
+            self.left_current_layer_unitaries,
+            bottom_combined_b_tensors=self.bottom_left_combined_bs,
             num_iterations=self.num_one_sided_iterations,
             max_virtual_bond_dim=self.max_virtual_bond_dim
         )
 
-        new_top_bs, new_schmidt_values, expectations, unitaries = out
+        expectations, _ = out
 
-        self.current_top_left_mps_tensors = new_top_bs
-        self.future_left_side_right_schmidt_values = new_schmidt_values
         self.left_expectations[-1].append(expectations)
-        self.left_current_layer_unitaries = unitaries
 
         self.__update_right_side_left_symmetry_environment()
 
@@ -286,25 +297,78 @@ class MPSBrickSolver:
         for _ in range(self.num_two_sided_iterations):
             self.two_sided_optimise_layer_one_iteration()
 
+    def initialize_unitaries(self):
+        # Really doing a bit more than initializing unitaries...
+
+        group = lambda x: group_elements(x, self.block_width, self.block_offset)
+
+        # Left side
+        top_left_grouped_bs = group(self.top_left_mps_tensors)
+        self.top_left_combined_bs = combine_grouped_b_tensors(top_left_grouped_bs)
+        # Is deepcopy really necessary here?
+        self.current_top_left_combined_bs = deepcopy(self.top_left_combined_bs)
+
+        bottom_left_grouped_bs = group(self.bottom_left_mps_tensors)
+        self.bottom_left_combined_bs = combine_grouped_b_tensors(bottom_left_grouped_bs)
+
+        self.left_current_layer_unitaries = [
+            get_npc_identity_operator(t) for t in self.top_left_combined_bs
+        ]
+
+        # Right side
+        top_right_grouped_bs = group(self.top_right_mps_tensors)
+        self.top_right_combined_bs = combine_grouped_b_tensors(top_right_grouped_bs)
+        self.current_top_right_combined_bs = deepcopy(self.top_right_combined_bs)
+
+        bottom_right_grouped_bs = group(self.bottom_right_mps_tensors)
+        self.bottom_right_combined_bs = combine_grouped_b_tensors(
+            bottom_right_grouped_bs
+        )
+
+        self.right_current_layer_unitaries = [
+            get_npc_identity_operator(t) for t in self.top_right_combined_bs
+        ]
+
     def add_new_layer(self):
         self.left_expectations.append(list())
         self.right_expectations.append(list())
 
+        self.initialize_unitaries()
+
     def finish_current_layer(self):
+        # Split tensors
+        out = MPSBrickSolver.split_b_tensors(
+            self.top_left_combined_bs,
+            self.left_current_layer_unitaries,
+            self.block_width,
+            self.block_offset,
+            self.current_left_side_right_schmidt_values,
+            self.max_virtual_bond_dim
+        )
+
+        new_left_top_bs, new_left_schmidt_values = out
+        self.top_left_mps_tensors = new_left_top_bs
+        self.current_left_side_right_schmidt_values = new_left_schmidt_values
+
+        out = MPSBrickSolver.split_b_tensors(
+            self.top_right_combined_bs,
+            self.right_current_layer_unitaries,
+            self.block_width,
+            self.block_offset,
+            self.current_right_side_left_schmidt_values,
+            self.max_virtual_bond_dim
+        )
+
+        new_right_top_bs, new_right_schmidt_values = out
+        self.top_right_mps_tensors = new_right_top_bs
+        self.current_right_side_left_schmidt_values = new_right_schmidt_values
+
         self.block_offset += self.block_width//2
         self.block_offset = (self.block_offset)//self.block_width
 
         self.left_unitaries.append(self.left_current_layer_unitaries)
         self.right_unitaries.append(self.right_current_layer_unitaries)
 
-        self.top_right_mps_tensors = self.current_top_right_mps_tensors
-        self.current_right_side_left_schmidt_values = (
-            self.future_right_side_left_schmidt_values
-        )
-        self.top_left_mps_tensors = self.current_top_left_mps_tensors
-        self.current_left_side_right_schmidt_values = (
-            self.future_left_side_right_schmidt_values
-        )
 
     def optimise(self):
         for _ in range(self.num_layers):
@@ -315,7 +379,7 @@ class MPSBrickSolver:
 
     @staticmethod
     def __flatten_list(l):
-        return [e for l1 in l for l2 in l for e in l2]
+        return [e for l1 in l for e in l1]
 
     def flatten_exps(self):
         """
@@ -344,6 +408,7 @@ class MPSBrickSolver:
         return out
 
     def manual_expectation_value(self):
+        # Currently this method only accounts for the "closed" layers.
         top_right_bs, _ = multiply_stacked_unitaries_against_mps(
             self.right_unitaries,
             self.bottom_right_mps_tensors,
