@@ -820,12 +820,14 @@ def inner_product_b_tensors(b_tensors, b_bra_tensors=None, left_environment=None
 
 def get_left_side_right_symmetry_environment(
     right_top_b_tensors, right_bottom_b_tensors, symmetry_transfer_matrix,
-    left_side_environment=False
+    left_side_environment=False, on_site_operators=None
     ):
     """
     Given symmetry_transfer_matrix and two sets of MPS tensors immediately to
     the right, contract the tensors to evalute the resulting symmetry
     environment from symmetry_transfer_matrix on it's left side. 
+
+    If on_site_operators is present, sandwich between top and bottom b tensors.
 
     (On the left side of said transfer matrix, the environment will be on the
     right of any relevant tensors, hence the name.)
@@ -833,11 +835,37 @@ def get_left_side_right_symmetry_environment(
     if right_bottom_b_tensors is None:
         right_bottom_b_tensors = right_top_b_tensors
 
+    ops = on_site_operators
+
     t = get_right_identity_environment_from_tp_tensor(right_top_b_tensors[-1])
 
-    for tb, bb in zip(right_top_b_tensors[::-1], right_bottom_b_tensors[::-1]):
-        t = npc.tensordot(t, tb, [['vL',], ['vR']])
-        t = npc.tensordot(t, bb.conj(), [['vL*', 'p'], ['vR*', 'p*']])
+    if ops is None:
+        for tb, bb in zip(right_top_b_tensors[::-1], right_bottom_b_tensors[::-1]):
+            t = npc.tensordot(t, tb, [['vL',], ['vR']])
+            leg_label = get_physical_leg_labels(t)[0]
+            leg_label_conj = conjugate_leg_label(leg_label)
+            t = npc.tensordot(
+                t,
+                bb.conj(),
+                [['vL*', leg_label], ['vR*', leg_label_conj]]
+            )
+
+    else:
+        triples = zip(
+            right_top_b_tensors[::-1],
+            ops[::-1],
+            right_bottom_b_tensors[::-1]
+        )
+        for tb, u, bb in triples:
+            t = npc.tensordot(t, tb, [['vL',], ['vR']])
+            leg_label = get_physical_leg_labels(t)[0]
+            leg_label_conj = conjugate_leg_label(leg_label)
+            t = npc.tensordot(t, u, [[leg_label], [leg_label_conj]])
+            t = npc.tensordot(
+                t,
+                bb.conj(),
+                [['vL*', leg_label], ['vR*', leg_label_conj]]
+            )
 
     out = npc.tensordot(
         t,
@@ -946,3 +974,10 @@ def multiply_stacked_unitaries_against_mps(unitaries, b_tensors,
         out_b_tensors, out_left_schmidt_values = out
 
     return out_b_tensors, out_left_schmidt_values
+
+###############################################################################
+
+def get_physical_dim(mps_tensor):
+    leg_label = get_physical_leg_labels(mps_tensor)[0]
+    out = mps_tensor.get_leg(leg_label).ind_len
+    return out
