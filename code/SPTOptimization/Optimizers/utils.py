@@ -271,3 +271,39 @@ def one_site_optimization_sweep_left(right_environment, mps_tensors,
         )
 
     return (expectations, current_right_environment, new_transfer_matrices)
+
+
+def mpo_tensor_raw_to_gradient(raw_mpo_tensor, gradient_target_tensor):
+    """
+    Update raw_mpo_tensor calculated to be the gradient by changing leg names
+    as neeeded so can be easily and consistently added to
+    gradient_target_tensor.
+    """
+    leg_labels = raw_mpo_tensor.get_leg_labels()
+
+    # First update the virtual legs (better way to do this, regex?)
+    old_new_leg_label_pairs = [
+        ('vL*', 'vR'),
+        ('vR*', 'vL'),
+        ('vL1*', 'vR'),
+        ('vR1*', 'vL'),
+        ('vLm', 'vR'),
+        ('vRm', 'vL'),
+    ]
+
+    for old, new in old_new_leg_label_pairs:
+        if old in leg_labels:
+            raw_mpo_tensor.ireplace_label(old, new)
+
+    # Then create new array to get the physical legs correct.
+    # Is this consistent? Should set order of leg labels on raw_mpo_tensor
+    # before casting to array?
+    # (The charges on the legs are wrong I guess...?)
+    out = npc.Array.from_ndarray_trivial(
+        raw_mpo_tensor.to_ndarray(),
+        labels=raw_mpo_tensor.get_leg_labels()
+    )
+
+    out.itranspose(gradient_target_tensor.get_leg_labels())
+
+    return out

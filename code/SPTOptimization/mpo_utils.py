@@ -269,3 +269,21 @@ def get_identity_mpo_tensors(physical_dims, virtual_dims):
     ]
 
     return w_tensors
+
+
+def mpo_socket_tensor_contraction(socket_tensor, mpo_tensor,
+    virtual_legs=[['vL*', 'vR*',], ['vR*', 'vL*',]]):
+    # An mpo tensor is a tensor with (typically) four legs. A "socket"
+    # tensor is meant to be contracted against such an mpo tensor to yield
+    # a number, such as in an expectation calculation. In the graphical
+    # notation, a socket tensor looks like a square (typcially) 4 wires
+    # pointing inwards.
+    raw_legs, target_legs = virtual_legs
+
+    out = npc.tensordot(
+        socket_tensor,
+        mpo_tensor,
+        [['p', 'p*', *raw_legs], ['p*', 'p', *target_legs]]
+    )
+
+    return out

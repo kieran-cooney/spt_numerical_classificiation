@@ -6,6 +6,7 @@ To-do:
       optimisation demands...?
     * Compare with original BrickSolver.py, duplication?
     * Bricks or blocks...
+* Why is this called MPSBrickSolver? Not a great name?
 """
 from copy import deepcopy
 
