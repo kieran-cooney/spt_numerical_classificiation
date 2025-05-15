@@ -2,6 +2,8 @@
 A simple implementation of the ADAM algorithm built to work with tenpy
 arrays.
 """
+import numpy as np
+
 
 class AdamTenpy:
     @staticmethod

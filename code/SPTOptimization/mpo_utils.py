@@ -2,6 +2,9 @@
 A collection of utility functions for dealing with tenpy MPOs.
 
 """
+import numpy as np
+rng = np.random.default_rng()
+
 import tenpy.linalg.np_conserved as npc
 
 from SPTOptimization.utils import (
@@ -30,7 +33,7 @@ def mpo_frobenius_inner_product(mpo1_tensors, mpo2_tensors=None):
     return t
 
 
-def partial_mpo_mpo_contraction_from_right(mpo1_tensors, mpo2_tensors):
+def partial_mpo_mpo_contraction_from_right(mpo1_tensors, mpo2_tensors=None):
     """
     Given two operators M1 and M2 represented as MPOs, calculate
     trace(M1 M2.conj()) but only partially contract tensors and return
@@ -285,5 +288,110 @@ def mpo_socket_tensor_contraction(socket_tensor, mpo_tensor,
         mpo_tensor,
         [['p', 'p*', *raw_legs], ['p*', 'p', *target_legs]]
     )
+
+    return out
+
+
+def two_sided_mpo_expectation(symmetry_case, left_mpo_tensors,
+    right_mpo_tensors):
+    case = symmetry_case
+
+    left_b_tensors = [
+        case.psi.get_B(i, form='A')
+        for i in range(
+            case.left_symmetry_index - 1,
+            case.left_symmetry_index - 1 - len(left_mpo_tensors), -1
+        )
+    ]
+
+    left_b_tensors = [
+        swap_left_right_indices(b)
+        for b in left_b_tensors
+    ]
+
+    right_b_tensors = [
+        case.psi.get_B(i)
+        for i in range(
+            case.right_symmetry_index + 1,
+            case.right_symmetry_index + 1 + len(right_mpo_tensors)
+        )
+    ]
+
+    t = right_b_tensors[-1]
+
+    t = npc.tensordot(
+        t,
+        right_mpo_tensors[-1].replace_label('vL', 'vLm'),
+        [['p',], ['p*']]
+    )
+
+    t = npc.tensordot(
+        t,
+        right_b_tensors[-1].conj(),
+        [['p', 'vR'], ['p*', 'vR*']]
+    )
+
+    for b, w in zip(right_b_tensors[-2:0:-1], right_mpo_tensors[-2:0:-1]):
+        t = npc.tensordot(t, b, [['vL',], ['vR']])
+        t = npc.tensordot(
+            t,
+            w.replace_label('vL', 'vLm'),
+            [['p', 'vLm'], ['p*', 'vR']]
+        )
+        t = npc.tensordot(t, b.conj(), [['p', 'vL*',], ['p*', 'vR*']])
+
+    t = npc.tensordot(t, right_b_tensors[0], [['vL',], ['vR']])
+    t = npc.tensordot(
+        t,
+        right_mpo_tensors[0],
+        [['p', 'vLm'], ['p*', 'vR']]
+    )
+    t = npc.tensordot(t, right_b_tensors[0].conj(), [['p', 'vL*',], ['p*', 'vR*']])
+    
+    
+    t = npc.tensordot(
+        t,
+        symmetry_case.npc_symmetry_transfer_matrix,
+        [['vL', 'vL*'], ['vR', 'vR*']]
+    )
+
+    t = swap_left_right_indices(t)
+
+    t = npc.tensordot(
+        t,
+        left_b_tensors[0],
+        [['vR',], ['vL',]]
+    )
+
+    t = npc.tensordot(
+        t,
+        left_mpo_tensors[0].replace_label('vR', 'vRm'),
+        [['p',], ['p*',]]
+    )
+
+    t = npc.tensordot(
+        t,
+        left_b_tensors[0].conj(),
+        [['p', 'vR*'], ['p*', 'vL*']]
+    )
+
+    for b, w in zip(left_b_tensors[1:-1], left_mpo_tensors[1:-1]):
+        t = npc.tensordot(t, b, [['vR',], ['vL']])
+        t = npc.tensordot(
+            t,
+            w.replace_label('vR', 'vRm'),
+            [['p', 'vRm'], ['p*', 'vL']]
+        )
+        t = npc.tensordot(t, b.conj(), [['p', 'vR*',], ['p*', 'vL*']])
+
+    t = npc.tensordot(t, left_b_tensors[-1], [['vR',], ['vL']])
+    t = npc.tensordot(
+        t,
+        left_mpo_tensors[-1],
+        [['p', 'vRm'], ['p*', 'vL']]
+    )
+    t = npc.tensordot(t, left_b_tensors[-1].conj(), [['p', 'vR*',], ['p*', 'vL*']])
+
+    out = npc.trace(t)
 
     return out

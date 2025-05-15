@@ -3,10 +3,14 @@ To-do:
     * Add overall description
     * Document class parameters
     * Functionality for variable bond dimension from site to site?
+    * There is an additional hyperparamter we can add, unitary loss is like
+      sqrt(1+unitarity), could be sqrt(1+a*unitarity). Currently just setting
+      a=1.
 """
 from functools import reduce
 from operator import mul
 
+import numpy as np
 import tenpy.linalg.np_conserved as npc
 
 from SPTOptimization.utils import (
@@ -22,18 +26,19 @@ from SPTOptimization.mpo_utils import (
     partial_mpo_mps_contraction_from_right,
     get_random_mpo_tensors,
     get_identity_mpo_tensors,
+    rescale_mpo_tensors,
     mpo_socket_tensor_contraction,
-)
-
-from SPTOptimization.Optimization.utils import (
-    mpo_tensor_raw_to_gradient,
 )
 
 from SPTOptimization.tenpy_leg_label_utils import (
     swap_left_right_indices
 )
 
-from AdamTenpy import AdamTenpy
+from SPTOptimization.Optimizers.utils import (
+    mpo_tensor_raw_to_gradient,
+)
+
+from SPTOptimization.Optimizers.AdamTenpy import AdamTenpy
 
 DEFAULT_NUM_SITES=6
 DEFAULT_VIRTUAL_BOND_DIM=8
@@ -43,11 +48,12 @@ DEFAULT_OVERLAP_LEARNING_RATE=1
 DEFAULT_ADAM_PARAMS=(1e-4, 0.35, 0.35)
 
 class MPOGradientDescent:
+
     @staticmethod
     def mpo_gradient_descent_one_side_one_iteration(mpo_tensors, b_tensors,
         total_dimension, right_overlap_tensors, unitarity_learning_rate,
-        overlap_learning_rate, overlap_target, left_environment,
-        adam_optimizers):
+        overlap_learning_rate, left_environment, adam_optimizers,
+        overlap_target=1):
         """
         Absolute mess of a function, should modularise a bit better.
         """
@@ -81,7 +87,7 @@ class MPOGradientDescent:
 
         order_2_score = mpo_socket_tensor_contraction(
             grad_2,
-            w,
+            w.conj(),
             [['vL*',], ['vR*',]]
         )
         order_2_score = order_2_score.real
@@ -97,7 +103,7 @@ class MPOGradientDescent:
 
         order_4_score = mpo_socket_tensor_contraction(
             grad_4,
-            w,
+            w.conj(),
             [['vL1*',], ['vR*',]]
         )
         order_4_score = order_4_score.real
@@ -120,7 +126,7 @@ class MPOGradientDescent:
 
         c_conj = mpo_socket_tensor_contraction(
             grad_o,
-            w,
+            w.conj(),
             [['vLm',], ['vR*',]]
         )
         c = c_conj.conjugate()
@@ -305,7 +311,7 @@ class MPOGradientDescent:
         return (grads, unitary_score, c_abs)
 
     def __init__(self, symmetry_case, num_sites=DEFAULT_NUM_SITES,
-        virtual_bond_dim=DEFAULT_MAX_VIRTUAL_BOND_DIM,
+        virtual_bond_dim=DEFAULT_VIRTUAL_BOND_DIM,
         unitarity_learning_rate=DEFAULT_UNITARITY_LEARNING_RATE,
         overlap_learning_rate=DEFAULT_OVERLAP_LEARNING_RATE,
         adam_params=DEFAULT_ADAM_PARAMS, random_initial_mpo=True):
@@ -331,7 +337,7 @@ class MPOGradientDescent:
         ]
 
         self.right_physical_dims = [
-            get_physical_dim(b) for b in self.right_b_tensors
+            get_physical_dim(b) for b in self.right_mps_tensors
         ]
         
         self.right_total_dimension = reduce(mul, self.right_physical_dims)
@@ -352,13 +358,10 @@ class MPOGradientDescent:
         ]
 
         self.left_physical_dims = [
-            get_physical_dim(b) for b in self.left_b_tensors
+            get_physical_dim(b) for b in self.left_mps_tensors
         ]
 
-        left_total_dimension = reduce(mul, self.left_physical_dims)
-
-        self.unitarity_scores = list()
-        self.mpo_expectations = list()
+        self.left_total_dimension = reduce(mul, self.left_physical_dims)
 
         self.virtual_dims = (
             [(None, self.virtual_bond_dim),] +
@@ -391,6 +394,11 @@ class MPOGradientDescent:
         self.symmetry_transfer_matrix = (
                 self.symmetry_case.npc_symmetry_transfer_matrix
         )
+        
+        self.unitarity_learning_rate = unitarity_learning_rate
+        self.overlap_learning_rate = overlap_learning_rate
+
+        self.adam_params = adam_params
 
         self.left_adam_optimizers = [
             AdamTenpy(*self.adam_params) for _ in range(self.num_sites)
@@ -400,12 +408,15 @@ class MPOGradientDescent:
             AdamTenpy(*self.adam_params) for _ in range(self.num_sites)
         ]
 
+        self.unitarity_scores = list()
+        self.mpo_expectations = list()
+
     def grad_desc_one_step(self):
         # Compute left and right symmetry environments
         # Right symmetry environment for left side first
         self.right_overlap_tensors = partial_mpo_mps_contraction_from_right(
             self.right_mpo_tensors,
-            self.right_b_tensors
+            self.right_mps_tensors
         )
         self.right_symmetry_environment = npc.tensordot(
             self.symmetry_transfer_matrix,
@@ -417,9 +428,9 @@ class MPOGradientDescent:
         )
 
         # Left symmetry environment for right side
-        self.left_overlap_tensors = overlap_right_tensors(
+        self.left_overlap_tensors = partial_mpo_mps_contraction_from_right(
             self.left_mpo_tensors,
-            self.left_b_tensors
+            self.left_mps_tensors
         )
         self.left_symmetry_environment = npc.tensordot(
             self.symmetry_transfer_matrix,
@@ -428,13 +439,13 @@ class MPOGradientDescent:
         )
 
         # Get right gradients
-        gd_out = MPOGradientDescent.mpo_gradient_descent_sweep(
+        gd_out = MPOGradientDescent.mpo_gradient_descent_one_side_one_iteration(
             self.right_mpo_tensors,
-            self.right_b_tensors,
+            self.right_mps_tensors,
+            self.right_total_dimension,
             self.right_overlap_tensors[1:],
             self.unitarity_learning_rate,
             self.overlap_learning_rate,
-            1,
             self.left_symmetry_environment,
             self.right_adam_optimizers
         )
@@ -448,18 +459,34 @@ class MPOGradientDescent:
             self.right_mpo_tensors[i] = self.right_mpo_tensors[i] - g
 
         # Get left gradients
-        gd_out = mpo_gradient_descent_sweep(
-            left_mpo_tensors,
-            left_b_tensors,
-            left_overlap_tensors[1:],
-            unitarity_learning_rate,
-            overlap_learning_rate,
-            1,
-            right_symmetry_environment,
-            left_adam_optimizers
+        gd_out = MPOGradientDescent.mpo_gradient_descent_one_side_one_iteration(
+            self.left_mpo_tensors,
+            self.left_mps_tensors,
+            self.left_total_dimension,
+            self.left_overlap_tensors[1:],
+            self.unitarity_learning_rate,
+            self.overlap_learning_rate,
+            self.right_symmetry_environment,
+            self.left_adam_optimizers
         )
         left_grads, *_ = gd_out
 
         for i, g in enumerate(left_grads):
             self.left_mpo_tensors[i] = self.left_mpo_tensors[i] - g
+
+    def compute_mpo_expectation(self):
+        out = self.symmetry_case.mpo_expectation(
+            self.left_mpo_tensors,
+            self.right_mpo_tensors
+        )
+        return out
+
+    def compute_training_losses(self):
+        U = np.array(self.unitarity_scores)
+        O = np.array(self.mpo_expectations)
+
+        self.training_losses = (
+            self.unitarity_learning_rate*np.sqrt(1+U)
+            + self.overlap_learning_rate*((O-1)*(np.conj(O)-1))
+        )
 
