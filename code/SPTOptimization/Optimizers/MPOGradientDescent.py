@@ -43,6 +43,7 @@ from SPTOptimization.Optimizers.AdamTenpy import AdamTenpy
 DEFAULT_NUM_SITES=6
 DEFAULT_VIRTUAL_BOND_DIM=8
 DEFAULT_UNITARITY_LEARNING_RATE=1
+DEFAULT_UNITARITY_SHAPE_PARAMETER=1
 DEFAULT_OVERLAP_LEARNING_RATE=1
 # alpha, beta1 & beta2
 DEFAULT_ADAM_PARAMS=(1e-4, 0.35, 0.35)
@@ -52,8 +53,8 @@ class MPOGradientDescent:
     @staticmethod
     def mpo_gradient_descent_one_side_one_iteration(mpo_tensors, b_tensors,
         total_dimension, right_overlap_tensors, unitarity_learning_rate,
-        overlap_learning_rate, left_environment, adam_optimizers,
-        overlap_target=1):
+        unitarity_shape_parameter, overlap_learning_rate, left_environment,
+        adam_optimizers, overlap_target=1):
         """
         Absolute mess of a function, should modularise a bit better.
         """
@@ -115,7 +116,11 @@ class MPOGradientDescent:
             - 2*order_2_score
             + total_dimension
         )
-        unitary_grad = (grad_4 - grad_2)/np.sqrt(1+unitary_score)
+
+        unitary_grad = (
+            unitarity_shape_parameter*(grad_4 - grad_2)
+            /np.sqrt(1+unitarity_shape_parameter*unitary_score)
+        )
         
         # Overlap terms
         t = right_overlap_tensors[0].conj().replace_label('vLm*', 'vLm')
@@ -203,8 +208,11 @@ class MPOGradientDescent:
 
             grad_4 = mpo_tensor_raw_to_gradient(grad_4, w)
 
-            unitary_grad = (grad_4 - grad_2)/np.sqrt(1+unitary_score)
-        
+            unitary_grad = (
+                unitarity_shape_parameter*(grad_4 - grad_2)
+                /np.sqrt(1+unitarity_shape_parameter*unitary_score)
+            )
+
             # Overlap terms
             left_overlap_tensor = left_overlap_tensors[-1]
 
@@ -279,7 +287,10 @@ class MPOGradientDescent:
 
         grad_4 = mpo_tensor_raw_to_gradient(grad_4, w)
         
-        unitary_grad = (grad_4 - grad_2)/np.sqrt(1+unitary_score)
+        unitary_grad = (
+            unitarity_shape_parameter*(grad_4 - grad_2)
+            /np.sqrt(1+unitarity_shape_parameter*unitary_score)
+        )
 
         left_overlap_tensor = left_overlap_tensors[-1]
         right_overlap_tensor = right_overlap_tensors[-1].conj()
@@ -313,6 +324,7 @@ class MPOGradientDescent:
     def __init__(self, symmetry_case, num_sites=DEFAULT_NUM_SITES,
         virtual_bond_dim=DEFAULT_VIRTUAL_BOND_DIM,
         unitarity_learning_rate=DEFAULT_UNITARITY_LEARNING_RATE,
+        unitarity_shape_parameter=DEFAULT_UNITARITY_SHAPE_PARAMETER,
         overlap_learning_rate=DEFAULT_OVERLAP_LEARNING_RATE,
         adam_params=DEFAULT_ADAM_PARAMS, random_initial_mpo=True):
         """
@@ -396,6 +408,7 @@ class MPOGradientDescent:
         )
         
         self.unitarity_learning_rate = unitarity_learning_rate
+        self.unitarity_shape_parameter = unitarity_shape_parameter
         self.overlap_learning_rate = overlap_learning_rate
 
         self.adam_params = adam_params
@@ -445,6 +458,7 @@ class MPOGradientDescent:
             self.right_total_dimension,
             self.right_overlap_tensors[1:],
             self.unitarity_learning_rate,
+            self.unitarity_shape_parameter,
             self.overlap_learning_rate,
             self.left_symmetry_environment,
             self.right_adam_optimizers
@@ -465,6 +479,7 @@ class MPOGradientDescent:
             self.left_total_dimension,
             self.left_overlap_tensors[1:],
             self.unitarity_learning_rate,
+            self.unitarity_shape_parameter,
             self.overlap_learning_rate,
             self.right_symmetry_environment,
             self.left_adam_optimizers
@@ -485,8 +500,13 @@ class MPOGradientDescent:
         U = np.array(self.unitarity_scores)
         O = np.array(self.mpo_expectations)
 
+        unitarity_losses = (
+            self.unitarity_learning_rate
+            *np.sqrt(1+self.unitarity_shape_parameter*U)
+        )
+
         self.training_losses = (
-            self.unitarity_learning_rate*np.sqrt(1+U)
+            unitarity_losses
             + self.overlap_learning_rate*((O-1)*(np.conj(O)-1))
         )
 
