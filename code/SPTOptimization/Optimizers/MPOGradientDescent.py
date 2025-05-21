@@ -127,7 +127,11 @@ class MPOGradientDescent:
 
         grad_o = npc.tensordot(t, b, [['vL'], ['vR',]])
         grad_o = npc.tensordot(grad_o, b.conj(), [['vL*',], ['vR*',]])
-        grad_o = npc.tensordot(grad_o, left_environment, [['vL', 'vL*'], ['vR', 'vR*']])
+        grad_o = npc.tensordot(
+            grad_o,
+            left_environment.conj(),
+            [['vL', 'vL*'], ['vR', 'vR*']]
+        )
 
         c_conj = mpo_socket_tensor_contraction(
             grad_o,
@@ -326,7 +330,8 @@ class MPOGradientDescent:
         unitarity_learning_rate=DEFAULT_UNITARITY_LEARNING_RATE,
         unitarity_shape_parameter=DEFAULT_UNITARITY_SHAPE_PARAMETER,
         overlap_learning_rate=DEFAULT_OVERLAP_LEARNING_RATE,
-        adam_params=DEFAULT_ADAM_PARAMS, random_initial_mpo=True):
+        adam_params=DEFAULT_ADAM_PARAMS, random_initial_mpo=True,
+        left_mpo_tensors=None, right_mpo_tensors=None):
         """
         Parameters
         ----------
@@ -381,23 +386,31 @@ class MPOGradientDescent:
             [(self.virtual_bond_dim, None),]
         )
 
-        if random_initial_mpo:
+        if right_mpo_tensors is not None:
+            self.right_mpo_tensors = right_mpo_tensors
+        elif random_initial_mpo:
             self.right_mpo_tensors = get_random_mpo_tensors(
                 self.right_physical_dims,
                 self.virtual_dims
             )
-            self.left_mpo_tensors = get_random_mpo_tensors(
-                self.left_physical_dims,
-                self.virtual_dims
-            )
-
+            # Better rescaling? One which gets closest to unitary?
             rescale_mpo_tensors(self.right_mpo_tensors, 1)
-            rescale_mpo_tensors(self.left_mpo_tensors, 1)
         else:
             self.right_mpo_tensors = get_identity_mpo_tensors(
                 self.right_physical_dims,
                 self.virtual_dims
             )
+
+        if left_mpo_tensors is not None:
+            self.left_mpo_tensors = left_mpo_tensors
+        elif random_initial_mpo:
+            self.left_mpo_tensors = get_random_mpo_tensors(
+                self.left_physical_dims,
+                self.virtual_dims
+            )
+
+            rescale_mpo_tensors(self.left_mpo_tensors, 1)
+        else:
             self.left_mpo_tensors = get_identity_mpo_tensors(
                 self.left_physical_dims,
                 self.virtual_dims

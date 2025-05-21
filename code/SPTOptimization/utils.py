@@ -215,6 +215,7 @@ def get_transfer_matrix_from_tp_unitary_and_b_tensor(b, unitary, b_bra=None,
 
     return t
 
+
 def get_transfer_matrix_from_tp_unitary(psi, index, unitary, form='B'):
     """
     Given an MPS representing a many body wave function psi, contract the
@@ -288,6 +289,40 @@ def get_transfer_matrix_from_unitary(psi, index, unitary=None, form='B'):
         u = to_npc_array(unitary)
 
     return get_transfer_matrix_from_tp_unitary(psi, index, u, form)
+
+
+def get_transfer_matrix_from_tp_unitary_list(psi, starting_index, unitaries,
+                                             form='B'):
+    """
+    Calculate the transfer matrix of psi and psi conjugate sandwiching the
+    list of unitaries. The unitaries are assumed to be adjacent, and ordered
+    with the first entry at the leftmost site.
+
+    Parameters
+    ----------
+    psi: tenpy.networks.mps.MPS
+        The mps to calcualte the transfer matrices from
+    starting_index: integer
+        The index of the MPS psi to calculate the first transfer matrix for.
+        The next will be for starting_index + 1 and so on.
+    unitaries: List of tenpy.npc.Array
+        List of single site operators. 
+    form: string
+        The "gauge" to use when calculating the transfer matrices. Passed to
+        MPS.get_B from the tenpy package.
+    Returns
+    -------
+    list of tenpy.linalg.np_conserved.Array
+        The resulting transfer matrices with legs vR, vR*, vL and vL*.
+    """
+    transfer_matrices = (
+        get_transfer_matrix_from_tp_unitary(psi, i, u, form=form)
+        for i, u in enumerate(unitaries, start=starting_index)
+    )
+
+    out = reduce(multiply_transfer_matrices, transfer_matrices)
+    
+    return transfer_matrices
 
 
 def get_transfer_matrices_from_tp_unitary_list(psi, starting_index, unitaries,
@@ -452,6 +487,7 @@ def get_left_identity_environment_from_tp_tensor(mps_tensor):
     left_environment = npc.diag(1, left_leg, labels = ['vR', 'vR*'])
 
     return left_environment
+
 
 def get_left_identity_environment(psi, site_index):
     """
@@ -637,7 +673,7 @@ def group_elements(l, group_size, offset=0):
 def combine_tensors(tensors):
     """
     Combine a group of tenpy Arrays with virtual legs 'vR' and 'vL' so that
-    virtual legs are contracted and the physicsl legs are grouped.
+    virtual legs are contracted and the physical legs are grouped.
     """
     contract_virtual_legs = lambda tl, tr: npc.tensordot(tl, tr, ['vR', 'vL'])
 
