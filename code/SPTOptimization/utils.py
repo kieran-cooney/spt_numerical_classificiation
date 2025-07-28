@@ -644,6 +644,24 @@ def get_npc_identity_operator(mps_tensor):
 
     return out
 
+
+def get_npc_random_operator(mps_tensor):
+    p_leg_label = get_physical_leg_labels(mps_tensor)[0]
+    p_leg = mps_tensor.get_leg(p_leg_label)
+    p_leg_label_conj = conjugate_leg_label(p_leg_label)
+
+    dim = p_leg.ind_len
+
+    out = npc.Array.from_func(
+        np.random.standard_normal,
+        legcharges=[p_leg, p_leg.conj()],
+        dtype='complex',
+        labels=[p_leg_label, p_leg_label_conj]
+    )
+
+    return out
+
+
 ###############################################################################
 # Functions for spllitng/grouping tenpy tensors.
 
