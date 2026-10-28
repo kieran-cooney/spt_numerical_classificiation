@@ -27,7 +27,8 @@ from matplotlib.lines import Line2D
 
 OUT = Path(__file__).resolve().parent
 ROOT = OUT.parents[1]
-COLORS = dict(product="#d87822", xzx="#2864a0", yzy="#a64d79", xzzzx="#32936f")
+# Insertion order controls case order in every panel, legend, and caption.
+COLORS = dict(yzy="#a64d79", product="#d87822", xzx="#2864a0", xzzzx="#32936f")
 LABELS = dict(product="Z", xzx="XZX", yzy="YZY", xzzzx="XZZZX")
 # (fermion decoration, Kramers sign), in the generation notebook's convention.
 TARGETS = dict(product=(1, 1), xzx=(-1, 1), yzy=(-1, -1), xzzzx=(1, -1))
@@ -171,8 +172,8 @@ def plot_results(data, summary, filtered, purity_bins):
         r"Real part of $(-1)^n$")
     invariant_panel(
         fig, grid[0, 1], data, ("kramers",),
-        r"B) Kramers invariant $\omega_f(t,t)$",
-        r"Real part of $\omega_f(t,t)$")
+        r"B) Extraction of $\omega(t,t)$ from defect operators",
+        r"Real part of $\omega(t,t)$")
 
     ax = fig.add_subplot(grid[1, 0])
     for si, (state, d) in enumerate(data.items()):
